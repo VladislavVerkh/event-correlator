@@ -3,12 +3,16 @@ package dev.verkhovskiy.eventcorrelator.autoconfigure;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.verkhovskiy.eventcorrelator.DefaultEventCorrelator;
 import dev.verkhovskiy.eventcorrelator.EventBufferRepository;
+import dev.verkhovskiy.eventcorrelator.EventCorrelationBoundary;
 import dev.verkhovskiy.eventcorrelator.EventCorrelator;
 import dev.verkhovskiy.eventcorrelator.EventDefinitionRegistry;
 import dev.verkhovskiy.eventcorrelator.EventFlowDefinition;
 import dev.verkhovskiy.eventcorrelator.postgres.PostgresEventBufferRepository;
+import dev.verkhovskiy.eventcorrelator.postgres.PostgresEventCorrelationLock;
+import dev.verkhovskiy.eventcorrelator.postgres.SpringPostgresEventCorrelationBoundary;
 import java.time.Clock;
 import java.util.List;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
@@ -17,6 +21,8 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 /** Автоконфигурация Spring Boot для event-correlator. */
 @AutoConfiguration
@@ -43,6 +49,32 @@ public class EventCorrelatorAutoConfiguration {
   @Bean
   @ConditionalOnMissingBean
   @ConditionalOnClass(NamedParameterJdbcTemplate.class)
+  @ConditionalOnBean(NamedParameterJdbcTemplate.class)
+  PostgresEventCorrelationLock postgresEventCorrelationLock(
+      NamedParameterJdbcTemplate jdbcTemplate) {
+    return new PostgresEventCorrelationLock(jdbcTemplate);
+  }
+
+  @Bean
+  @ConditionalOnMissingBean
+  @ConditionalOnClass(TransactionTemplate.class)
+  @ConditionalOnBean(PlatformTransactionManager.class)
+  TransactionTemplate eventCorrelatorTransactionTemplate(
+      PlatformTransactionManager transactionManager) {
+    return new TransactionTemplate(transactionManager);
+  }
+
+  @Bean
+  @ConditionalOnMissingBean
+  @ConditionalOnBean({TransactionTemplate.class, PostgresEventCorrelationLock.class})
+  EventCorrelationBoundary eventCorrelationBoundary(
+      TransactionTemplate transactionTemplate, PostgresEventCorrelationLock lock) {
+    return new SpringPostgresEventCorrelationBoundary(transactionTemplate, lock);
+  }
+
+  @Bean
+  @ConditionalOnMissingBean
+  @ConditionalOnClass(NamedParameterJdbcTemplate.class)
   @ConditionalOnBean({
     NamedParameterJdbcTemplate.class,
     ObjectMapper.class,
@@ -59,7 +91,15 @@ public class EventCorrelatorAutoConfiguration {
   @ConditionalOnMissingBean
   @ConditionalOnBean({EventDefinitionRegistry.class, EventBufferRepository.class, Clock.class})
   EventCorrelator eventCorrelator(
-      EventDefinitionRegistry definitionRegistry, EventBufferRepository repository, Clock clock) {
-    return new DefaultEventCorrelator(definitionRegistry, repository, clock);
+      EventDefinitionRegistry definitionRegistry,
+      EventBufferRepository repository,
+      Clock clock,
+      ObjectProvider<EventCorrelationBoundary> boundary) {
+    EventCorrelationBoundary eventCorrelationBoundary = boundary.getIfAvailable();
+    if (eventCorrelationBoundary == null) {
+      return new DefaultEventCorrelator(definitionRegistry, repository, clock);
+    }
+    return new DefaultEventCorrelator(
+        definitionRegistry, repository, clock, eventCorrelationBoundary);
   }
 }

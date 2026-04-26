@@ -12,13 +12,23 @@ public class DefaultEventCorrelator implements EventCorrelator {
   private final EventDefinitionRegistry definitionRegistry;
   private final EventBufferRepository repository;
   private final Clock clock;
+  private final EventCorrelationBoundary boundary;
 
   public DefaultEventCorrelator(
       EventDefinitionRegistry definitionRegistry, EventBufferRepository repository, Clock clock) {
+    this(definitionRegistry, repository, clock, new DirectEventCorrelationBoundary());
+  }
+
+  public DefaultEventCorrelator(
+      EventDefinitionRegistry definitionRegistry,
+      EventBufferRepository repository,
+      Clock clock,
+      EventCorrelationBoundary boundary) {
     this.definitionRegistry =
         Objects.requireNonNull(definitionRegistry, "definitionRegistry must not be null");
     this.repository = Objects.requireNonNull(repository, "repository must not be null");
     this.clock = Objects.requireNonNull(clock, "clock must not be null");
+    this.boundary = Objects.requireNonNull(boundary, "boundary must not be null");
   }
 
   @Override
@@ -26,6 +36,14 @@ public class DefaultEventCorrelator implements EventCorrelator {
     Objects.requireNonNull(event, "event must not be null");
     EventFlowDefinition flow = definitionRegistry.requireFlow(event.flowName());
     EventTypeDefinition<?> definition = flow.requireEvent(event.eventType());
+    return boundary.execute(
+        event.flowName(),
+        event.correlationKey(),
+        () -> acceptInsideBoundary(event, flow, definition));
+  }
+
+  private EventCorrelationResult acceptInsideBoundary(
+      IncomingEvent<?> event, EventFlowDefinition flow, EventTypeDefinition<?> definition) {
     BufferedEvent bufferedEvent = BufferedEvent.received(event);
 
     if (!repository.insertIfAbsent(bufferedEvent)) {

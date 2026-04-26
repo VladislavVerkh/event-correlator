@@ -13,6 +13,7 @@
 - core contracts и DSL для описания связанных событий;
 - `DefaultEventCorrelator`, который дедуплицирует события, проверяет зависимости и обрабатывает
   pending-события после появления root/dependency;
+- transactional/locking boundary для последовательной обработки одного `flowName + correlationKey`;
 - `EventBufferRepository` как storage contract;
 - PostgreSQL repository и Flyway migration для `ec_event_inbox`;
 - Spring Boot autoconfiguration;

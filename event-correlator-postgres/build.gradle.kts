@@ -24,6 +24,7 @@ dependencies {
     api(project(":event-correlator-core"))
 
     implementation("org.springframework:spring-jdbc")
+    implementation("org.springframework:spring-tx")
     implementation("com.fasterxml.jackson.core:jackson-databind")
 
     testImplementation("org.junit.jupiter:junit-jupiter")
@@ -44,4 +45,3 @@ publishing {
 tasks.withType<Test> {
     useJUnitPlatform()
 }
-

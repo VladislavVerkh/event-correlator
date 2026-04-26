@@ -10,6 +10,7 @@ import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Supplier;
 import org.junit.jupiter.api.Test;
 
 class DefaultEventCorrelatorTest {
@@ -83,6 +84,38 @@ class DefaultEventCorrelatorTest {
 
     assertThat(correlator.accept(event).status()).isEqualTo(EventCorrelationStatus.PROCESSED);
     assertThat(correlator.accept(event).status()).isEqualTo(EventCorrelationStatus.DUPLICATE);
+  }
+
+  @Test
+  void executesAcceptInsideCorrelationBoundary() {
+    EventFlowDefinition flow =
+        EventFlowDefinition.builder("contract-events")
+            .rootEvent(
+                "contract.created",
+                ContractCreated.class,
+                ContractCreated::contractId,
+                payload -> {})
+            .build();
+    TestEventBufferRepository repository = new TestEventBufferRepository();
+    RecordingBoundary boundary = new RecordingBoundary();
+    EventCorrelator correlator =
+        new DefaultEventCorrelator(
+            new EventDefinitionRegistry(List.of(flow)),
+            repository,
+            Clock.fixed(Instant.parse("2026-01-01T00:00:00Z"), ZoneOffset.UTC),
+            boundary);
+
+    correlator.accept(
+        event(
+            "contract-events",
+            "contract.created",
+            "event-1",
+            "contract-1",
+            new ContractCreated("contract-1")));
+
+    assertThat(boundary.calls).isEqualTo(1);
+    assertThat(boundary.flowName).isEqualTo("contract-events");
+    assertThat(boundary.correlationKey).isEqualTo("contract-1");
   }
 
   private EventCorrelator correlator(
@@ -174,6 +207,20 @@ class DefaultEventCorrelatorTest {
 
     private void update(EventPointer pointer, EventStatus status) {
       events.computeIfPresent(pointer, (ignored, event) -> event.withStatus(status));
+    }
+  }
+
+  private static final class RecordingBoundary implements EventCorrelationBoundary {
+    private int calls;
+    private String flowName;
+    private String correlationKey;
+
+    @Override
+    public <T> T execute(String flowName, String correlationKey, Supplier<T> action) {
+      this.calls++;
+      this.flowName = flowName;
+      this.correlationKey = correlationKey;
+      return action.get();
     }
   }
 }

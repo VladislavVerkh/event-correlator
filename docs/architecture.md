@@ -51,6 +51,36 @@ received_at, created_at
 Если между двумя событиями нет явной зависимости, порядок их handlers определяется временем приема.
 Если бизнесу нужен строгий порядок, его надо выразить через `.requires(...)`.
 
+## Транзакция и lock
+
+В Spring/PostgreSQL режиме весь прием события выполняется внутри одной boundary:
+
+```text
+open transaction
+  -> pg_advisory_xact_lock(flowName, correlationKey)
+  -> insert incoming event
+  -> check dependencies
+  -> call handler when ready
+  -> update event status
+  -> drain pending events with the same correlationKey
+commit transaction
+```
+
+Lock берется по паре `flowName + correlationKey`, поэтому два события одного бизнес-объекта не
+должны одновременно проверять зависимости и выпускать pending-события. События разных
+`correlationKey` могут обрабатываться параллельно.
+
+PostgreSQL implementation использует transaction-scoped advisory lock:
+
+```sql
+pg_advisory_xact_lock(hashtext(flow_name), hashtext(correlation_key))
+```
+
+Если handler завершился исключением, текущая реализация переводит событие в `FAILED` и возвращает
+`EventCorrelationStatus.FAILED`. Поэтому handler должен быть идемпотентным и не оставлять частично
+примененные бизнес-изменения перед выбросом исключения. Более строгая retry/rollback модель будет
+отдельным слоем развития.
+
 ## Границы ответственности
 
 Библиотека отвечает за:
@@ -60,6 +90,7 @@ received_at, created_at
 - хранение событий, которые пришли раньше зависимостей;
 - проверку required event types по `correlationKey`;
 - повторную попытку pending-событий после успешной обработки зависимости;
+- serializing обработки одного `flowName + correlationKey` через transactional boundary;
 - retention marker для orphan events.
 
 Приложение отвечает за:

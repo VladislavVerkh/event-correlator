@@ -32,6 +32,7 @@ dependencies {
 
     implementation("org.springframework.boot:spring-boot-autoconfigure")
     implementation("org.springframework:spring-jdbc")
+    implementation("org.springframework:spring-tx")
     implementation("com.fasterxml.jackson.core:jackson-databind")
 
     annotationProcessor("org.springframework.boot:spring-boot-configuration-processor")
@@ -52,4 +53,3 @@ publishing {
 tasks.withType<Test> {
     useJUnitPlatform()
 }
-

@@ -4,14 +4,18 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import dev.verkhovskiy.eventcorrelator.EventCorrelationBoundary;
 import dev.verkhovskiy.eventcorrelator.EventCorrelator;
 import dev.verkhovskiy.eventcorrelator.EventDefinitionRegistry;
 import dev.verkhovskiy.eventcorrelator.EventFlowDefinition;
 import dev.verkhovskiy.eventcorrelator.postgres.PostgresEventBufferRepository;
+import dev.verkhovskiy.eventcorrelator.postgres.PostgresEventCorrelationLock;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 class EventCorrelatorAutoConfigurationTest {
 
@@ -21,10 +25,14 @@ class EventCorrelatorAutoConfigurationTest {
         .withConfiguration(AutoConfigurations.of(EventCorrelatorAutoConfiguration.class))
         .withBean(ObjectMapper.class, ObjectMapper::new)
         .withBean(NamedParameterJdbcTemplate.class, () -> mock(NamedParameterJdbcTemplate.class))
+        .withBean(PlatformTransactionManager.class, () -> mock(PlatformTransactionManager.class))
         .withBean(EventFlowDefinition.class, EventCorrelatorAutoConfigurationTest::flow)
         .run(
             context -> {
               assertThat(context).hasSingleBean(EventDefinitionRegistry.class);
+              assertThat(context).hasSingleBean(PostgresEventCorrelationLock.class);
+              assertThat(context).hasSingleBean(TransactionTemplate.class);
+              assertThat(context).hasSingleBean(EventCorrelationBoundary.class);
               assertThat(context).hasSingleBean(PostgresEventBufferRepository.class);
               assertThat(context).hasSingleBean(EventCorrelator.class);
             });
