@@ -1,2 +1,2 @@
 dev.verkhovskiy.eventcorrelator.autoconfigure.EventCorrelatorAutoConfiguration
-
+dev.verkhovskiy.eventcorrelator.autoconfigure.EventCorrelatorMicrometerAutoConfiguration

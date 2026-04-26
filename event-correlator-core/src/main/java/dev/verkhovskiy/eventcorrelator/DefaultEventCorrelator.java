@@ -1,6 +1,7 @@
 package dev.verkhovskiy.eventcorrelator;
 
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -14,6 +15,7 @@ public class DefaultEventCorrelator implements EventCorrelator {
   private final Clock clock;
   private final EventCorrelationBoundary boundary;
   private final EventFailureRetryPolicy failureRetryPolicy;
+  private final EventCorrelatorObserver observer;
 
   public DefaultEventCorrelator(
       EventDefinitionRegistry definitionRegistry, EventBufferRepository repository, Clock clock) {
@@ -39,6 +41,22 @@ public class DefaultEventCorrelator implements EventCorrelator {
       Clock clock,
       EventCorrelationBoundary boundary,
       EventFailureRetryPolicy failureRetryPolicy) {
+    this(
+        definitionRegistry,
+        repository,
+        clock,
+        boundary,
+        failureRetryPolicy,
+        EventCorrelatorObserver.NOOP);
+  }
+
+  public DefaultEventCorrelator(
+      EventDefinitionRegistry definitionRegistry,
+      EventBufferRepository repository,
+      Clock clock,
+      EventCorrelationBoundary boundary,
+      EventFailureRetryPolicy failureRetryPolicy,
+      EventCorrelatorObserver observer) {
     this.definitionRegistry =
         Objects.requireNonNull(definitionRegistry, "definitionRegistry must not be null");
     this.repository = Objects.requireNonNull(repository, "repository must not be null");
@@ -46,6 +64,9 @@ public class DefaultEventCorrelator implements EventCorrelator {
     this.boundary = Objects.requireNonNull(boundary, "boundary must not be null");
     this.failureRetryPolicy =
         Objects.requireNonNull(failureRetryPolicy, "failureRetryPolicy must not be null");
+    this.observer =
+        CompositeEventCorrelatorObserver.of(
+            List.of(Objects.requireNonNull(observer, "observer must not be null")));
   }
 
   @Override
@@ -103,8 +124,10 @@ public class DefaultEventCorrelator implements EventCorrelator {
     BufferedEvent bufferedEvent = BufferedEvent.received(event);
 
     if (!repository.insertIfAbsent(bufferedEvent)) {
+      observer.eventDuplicate(bufferedEvent);
       return EventCorrelationResult.duplicate(bufferedEvent.pointer());
     }
+    observer.eventAccepted(bufferedEvent);
 
     EventCorrelationResult result = correlate(flow, definition, bufferedEvent);
     if (result.status() == EventCorrelationStatus.PROCESSED) {
@@ -120,17 +143,22 @@ public class DefaultEventCorrelator implements EventCorrelator {
       Instant expiresAt = Instant.now(clock).plus(flow.orphanRetention());
       repository.markPending(
           event.pointer(), "missing dependencies: " + missingDependencies, expiresAt);
+      observer.eventPending(event.withStatus(EventStatus.PENDING), missingDependencies);
       return EventCorrelationResult.pending(event.pointer(), missingDependencies);
     }
 
+    long startedAt = System.nanoTime();
     try {
       definition.handleUntyped(event.payload());
       repository.markProcessed(event.pointer());
+      observer.eventProcessed(event.withStatus(EventStatus.PROCESSED), elapsedSince(startedAt));
       return EventCorrelationResult.processed(event.pointer());
     } catch (RuntimeException e) {
       Instant nextRetryAt = Instant.now(clock).plus(failureRetryPolicy.retryDelay());
       repository.markFailed(
           event.pointer(), e.getMessage(), nextRetryAt, failureRetryPolicy.maxAttempts());
+      observer.eventFailed(
+          event.withStatus(EventStatus.FAILED), e.getMessage(), elapsedSince(startedAt));
       return EventCorrelationResult.failed(event.pointer(), e.getMessage());
     }
   }
@@ -159,5 +187,9 @@ public class DefaultEventCorrelator implements EventCorrelator {
       }
     }
     return missing;
+  }
+
+  private Duration elapsedSince(long startedAt) {
+    return Duration.ofNanos(System.nanoTime() - startedAt);
   }
 }

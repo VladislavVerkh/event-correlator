@@ -180,6 +180,52 @@ Optional<EventCorrelationResult> result =
 PostgreSQL implementation использует `for update skip locked`, поэтому два оператора или два
 экземпляра приложения не должны одновременно повторно обработать одно и то же failed-событие.
 
+## Наблюдаемость
+
+Core runtime публикует события наблюдаемости через `EventCorrelatorObserver`. Observer получает
+уведомления о ключевых переходах:
+
+- событие впервые сохранено в inbox;
+- событие оказалось duplicate;
+- событие перешло в `PENDING`;
+- handler завершился `PROCESSED` или `FAILED`;
+- expiration перевел batch pending-событий в `EXPIRED`;
+- retry-сервис захватил batch failed-событий;
+- ручной replay захватил или не нашел конкретное failed-событие.
+
+Ошибки observer-а не влияют на обработку бизнес-событий: `CompositeEventCorrelatorObserver`
+перехватывает `RuntimeException` и продолжает уведомлять остальные observers.
+
+Spring Boot starter автоматически добавляет Micrometer observer, если в контексте есть
+`MeterRegistry`. Публикуются metrics:
+
+```text
+event.correlator.events.accepted
+event.correlator.events.outcome
+event.correlator.handler.duration
+event.correlator.pending.expired
+event.correlator.failed.retry.claimed
+event.correlator.failed.manual.replay
+```
+
+Для event-level metrics используются низкокардинальные tags `flow`, `event_type`, `status`.
+`eventId` и `correlationKey` не попадают в Micrometer tags, чтобы не раздувать cardinality.
+
+Для собственной интеграции можно объявить Spring bean:
+
+```java
+@Bean
+EventCorrelatorObserver eventCorrelatorObserver() {
+  return new EventCorrelatorObserver() {
+    @Override
+    public void eventFailed(
+        BufferedEvent event, String failureMessage, Duration handlingDuration) {
+      // Отправка события в лог, tracing или внешний monitoring.
+    }
+  };
+}
+```
+
 ## Валидация definitions
 
 `EventFlowDefinition` проверяется при `build()` и при регистрации в `EventDefinitionRegistry`.

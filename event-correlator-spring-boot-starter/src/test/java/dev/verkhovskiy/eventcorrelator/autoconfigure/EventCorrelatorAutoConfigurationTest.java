@@ -6,6 +6,7 @@ import static org.mockito.Mockito.mock;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.verkhovskiy.eventcorrelator.EventCorrelationBoundary;
 import dev.verkhovskiy.eventcorrelator.EventCorrelator;
+import dev.verkhovskiy.eventcorrelator.EventCorrelatorObserver;
 import dev.verkhovskiy.eventcorrelator.EventDefinitionRegistry;
 import dev.verkhovskiy.eventcorrelator.EventFailureRetryPolicy;
 import dev.verkhovskiy.eventcorrelator.EventFlowDefinition;
@@ -15,6 +16,8 @@ import dev.verkhovskiy.eventcorrelator.FailedEventRetryService;
 import dev.verkhovskiy.eventcorrelator.PendingEventExpirationService;
 import dev.verkhovskiy.eventcorrelator.postgres.PostgresEventBufferRepository;
 import dev.verkhovskiy.eventcorrelator.postgres.PostgresEventCorrelationLock;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
@@ -59,6 +62,18 @@ class EventCorrelatorAutoConfigurationTest {
               assertThat(context).doesNotHaveBean(EventDefinitionRegistry.class);
               assertThat(context).doesNotHaveBean(EventCorrelator.class);
             });
+  }
+
+  @Test
+  void createsMicrometerObserverWhenMeterRegistryExists() {
+    new ApplicationContextRunner()
+        .withConfiguration(
+            AutoConfigurations.of(
+                EventCorrelatorAutoConfiguration.class,
+                EventCorrelatorMicrometerAutoConfiguration.class))
+        .withBean(MeterRegistry.class, SimpleMeterRegistry::new)
+        .withBean(EventFlowDefinition.class, EventCorrelatorAutoConfigurationTest::flow)
+        .run(context -> assertThat(context).hasSingleBean(EventCorrelatorObserver.class));
   }
 
   private static EventFlowDefinition flow() {

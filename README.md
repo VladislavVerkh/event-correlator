@@ -18,6 +18,7 @@
 - `EventBufferRepository` как storage contract;
 - PostgreSQL repository и Flyway migration для `ec_event_inbox`;
 - Spring Boot autoconfiguration;
+- хуки наблюдаемости и Micrometer metrics через Spring Boot starter;
 - `EventInboxInspector` для диагностики событий в durable inbox;
 - `PendingEventExpirationService` для перевода просроченных orphan events в `EXPIRED`;
 - `FailedEventRetryService` для повторной обработки transient failures;
@@ -145,6 +146,21 @@ Optional<EventCorrelationResult> result =
 ```
 
 `Optional.empty()` означает, что событие не найдено или сейчас не находится в статусе `FAILED`.
+
+Если в Spring Boot приложении есть `MeterRegistry`, starter автоматически публикует Micrometer
+metrics:
+
+```text
+event.correlator.events.accepted
+event.correlator.events.outcome
+event.correlator.handler.duration
+event.correlator.pending.expired
+event.correlator.failed.retry.claimed
+event.correlator.failed.manual.replay
+```
+
+Для собственной интеграции с логами, tracing или алертами можно объявить бин
+`EventCorrelatorObserver`.
 
 ## Сборка
 

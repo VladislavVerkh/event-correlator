@@ -11,6 +11,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
 import org.junit.jupiter.api.Test;
 
@@ -144,6 +145,52 @@ class DefaultEventCorrelatorTest {
 
     assertThat(result.status()).isEqualTo(EventCorrelationStatus.PROCESSED);
     assertThat(repository.correlationKey("event-1")).isEqualTo("derived:contract-1");
+  }
+
+  @Test
+  void notifiesObserverAboutAcceptedAndProcessedEvent() {
+    AtomicInteger accepted = new AtomicInteger();
+    AtomicInteger processed = new AtomicInteger();
+    EventFlowDefinition flow =
+        EventFlowDefinition.builder("contract-events")
+            .rootEvent(
+                "contract.created",
+                ContractCreated.class,
+                ContractCreated::contractId,
+                payload -> {})
+            .build();
+    TestEventBufferRepository repository = new TestEventBufferRepository();
+    EventCorrelatorObserver observer =
+        new EventCorrelatorObserver() {
+          @Override
+          public void eventAccepted(BufferedEvent event) {
+            accepted.incrementAndGet();
+          }
+
+          @Override
+          public void eventProcessed(BufferedEvent event, java.time.Duration handlingDuration) {
+            processed.incrementAndGet();
+          }
+        };
+    EventCorrelator correlator =
+        new DefaultEventCorrelator(
+            new EventDefinitionRegistry(List.of(flow)),
+            repository,
+            Clock.fixed(Instant.parse("2026-01-01T00:00:00Z"), ZoneOffset.UTC),
+            new DirectEventCorrelationBoundary(),
+            EventFailureRetryPolicy.noRetries(),
+            observer);
+
+    correlator.accept(
+        event(
+            "contract-events",
+            "contract.created",
+            "event-1",
+            "contract-1",
+            new ContractCreated("contract-1")));
+
+    assertThat(accepted).hasValue(1);
+    assertThat(processed).hasValue(1);
   }
 
   private EventCorrelator correlator(

@@ -91,6 +91,60 @@ class FailedEventReplayServiceTest {
     assertThat(replayResult).isEmpty();
   }
 
+  @Test
+  void notifiesObserverAboutManualReplayClaim() {
+    AtomicInteger claimed = new AtomicInteger();
+    TestEventBufferRepository repository = new TestEventBufferRepository();
+    EventCorrelatorObserver observer =
+        new EventCorrelatorObserver() {
+          @Override
+          public void failedManualReplayClaimed(EventPointer pointer, boolean claimResult) {
+            if (claimResult) {
+              claimed.incrementAndGet();
+            }
+          }
+        };
+    repository.insertIfAbsent(
+        new BufferedEvent(
+            "contract-events",
+            "contract.created",
+            "event-1",
+            "contract-1",
+            new ContractCreated("contract-1"),
+            Map.of(),
+            null,
+            Instant.parse("2026-01-01T00:00:00Z"),
+            EventStatus.RECEIVED));
+    repository.markFailed(
+        new EventPointer("contract-events", "event-1"),
+        "temporary failure",
+        Instant.parse("2026-01-01T00:00:30Z"),
+        1);
+    EventCorrelator correlator =
+        new EventCorrelator() {
+          @Override
+          public EventCorrelationResult accept(IncomingEvent<?> event) {
+            throw new UnsupportedOperationException();
+          }
+
+          @Override
+          public EventCorrelationResult accept(RawIncomingEvent<?> event) {
+            throw new UnsupportedOperationException();
+          }
+
+          @Override
+          public EventCorrelationResult replay(BufferedEvent event) {
+            return EventCorrelationResult.processed(event.pointer());
+          }
+        };
+    FailedEventReplayService replayService =
+        new FailedEventReplayService(repository, correlator, observer);
+
+    replayService.replayFailed("contract-events", "event-1");
+
+    assertThat(claimed).hasValue(1);
+  }
+
   private record ContractCreated(String contractId) {}
 
   private static final class TestEventBufferRepository implements EventBufferRepository {

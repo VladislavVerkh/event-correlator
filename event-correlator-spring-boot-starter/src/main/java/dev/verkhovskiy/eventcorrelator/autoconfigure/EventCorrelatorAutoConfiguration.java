@@ -1,11 +1,13 @@
 package dev.verkhovskiy.eventcorrelator.autoconfigure;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import dev.verkhovskiy.eventcorrelator.CompositeEventCorrelatorObserver;
 import dev.verkhovskiy.eventcorrelator.DefaultEventCorrelator;
 import dev.verkhovskiy.eventcorrelator.DirectEventCorrelationBoundary;
 import dev.verkhovskiy.eventcorrelator.EventBufferRepository;
 import dev.verkhovskiy.eventcorrelator.EventCorrelationBoundary;
 import dev.verkhovskiy.eventcorrelator.EventCorrelator;
+import dev.verkhovskiy.eventcorrelator.EventCorrelatorObserver;
 import dev.verkhovskiy.eventcorrelator.EventDefinitionRegistry;
 import dev.verkhovskiy.eventcorrelator.EventFailureRetryPolicy;
 import dev.verkhovskiy.eventcorrelator.EventFlowDefinition;
@@ -117,27 +119,38 @@ public class EventCorrelatorAutoConfiguration {
       EventBufferRepository repository,
       Clock clock,
       ObjectProvider<EventCorrelationBoundary> boundary,
-      EventFailureRetryPolicy failureRetryPolicy) {
+      EventFailureRetryPolicy failureRetryPolicy,
+      ObjectProvider<EventCorrelatorObserver> observers) {
     EventCorrelationBoundary eventCorrelationBoundary = boundary.getIfAvailable();
+    EventCorrelatorObserver observer = observer(observers);
     if (eventCorrelationBoundary == null) {
       return new DefaultEventCorrelator(
           definitionRegistry,
           repository,
           clock,
           new DirectEventCorrelationBoundary(),
-          failureRetryPolicy);
+          failureRetryPolicy,
+          observer);
     }
     return new DefaultEventCorrelator(
-        definitionRegistry, repository, clock, eventCorrelationBoundary, failureRetryPolicy);
+        definitionRegistry,
+        repository,
+        clock,
+        eventCorrelationBoundary,
+        failureRetryPolicy,
+        observer);
   }
 
   @Bean
   @ConditionalOnMissingBean
   @ConditionalOnBean({EventBufferRepository.class, Clock.class})
   PendingEventExpirationService pendingEventExpirationService(
-      EventBufferRepository repository, Clock clock, EventCorrelatorProperties properties) {
+      EventBufferRepository repository,
+      Clock clock,
+      EventCorrelatorProperties properties,
+      ObjectProvider<EventCorrelatorObserver> observers) {
     return new PendingEventExpirationService(
-        repository, clock, properties.getExpirationBatchSize());
+        repository, clock, properties.getExpirationBatchSize(), observer(observers));
   }
 
   @Bean
@@ -147,16 +160,27 @@ public class EventCorrelatorAutoConfiguration {
       EventBufferRepository repository,
       EventCorrelator eventCorrelator,
       Clock clock,
-      EventCorrelatorProperties properties) {
+      EventCorrelatorProperties properties,
+      ObjectProvider<EventCorrelatorObserver> observers) {
     return new FailedEventRetryService(
-        repository, eventCorrelator, clock, properties.getFailedRetryBatchSize());
+        repository,
+        eventCorrelator,
+        clock,
+        properties.getFailedRetryBatchSize(),
+        observer(observers));
   }
 
   @Bean
   @ConditionalOnMissingBean
   @ConditionalOnBean({EventBufferRepository.class, EventCorrelator.class})
   FailedEventReplayService failedEventReplayService(
-      EventBufferRepository repository, EventCorrelator eventCorrelator) {
-    return new FailedEventReplayService(repository, eventCorrelator);
+      EventBufferRepository repository,
+      EventCorrelator eventCorrelator,
+      ObjectProvider<EventCorrelatorObserver> observers) {
+    return new FailedEventReplayService(repository, eventCorrelator, observer(observers));
+  }
+
+  private EventCorrelatorObserver observer(ObjectProvider<EventCorrelatorObserver> observers) {
+    return CompositeEventCorrelatorObserver.of(observers.orderedStream().toList());
   }
 }

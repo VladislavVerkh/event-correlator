@@ -7,6 +7,7 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 
 class PendingEventExpirationServiceTest {
@@ -23,6 +24,29 @@ class PendingEventExpirationServiceTest {
     assertThat(expired).isEqualTo(3);
     assertThat(repository.now).isEqualTo(Instant.parse("2026-01-01T00:00:00Z"));
     assertThat(repository.limit).isEqualTo(50);
+  }
+
+  @Test
+  void notifiesObserverAboutExpiredCount() {
+    RecordingEventBufferRepository repository = new RecordingEventBufferRepository();
+    AtomicInteger expiredCount = new AtomicInteger();
+    EventCorrelatorObserver observer =
+        new EventCorrelatorObserver() {
+          @Override
+          public void pendingExpired(int count) {
+            expiredCount.set(count);
+          }
+        };
+    PendingEventExpirationService service =
+        new PendingEventExpirationService(
+            repository,
+            Clock.fixed(Instant.parse("2026-01-01T00:00:00Z"), ZoneOffset.UTC),
+            50,
+            observer);
+
+    service.runOnce();
+
+    assertThat(expiredCount).hasValue(3);
   }
 
   private static final class RecordingEventBufferRepository implements EventBufferRepository {

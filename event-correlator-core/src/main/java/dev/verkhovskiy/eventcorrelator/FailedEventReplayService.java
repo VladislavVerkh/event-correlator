@@ -1,5 +1,6 @@
 package dev.verkhovskiy.eventcorrelator;
 
+import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 
@@ -8,12 +9,23 @@ public final class FailedEventReplayService {
 
   private final EventBufferRepository repository;
   private final EventCorrelator eventCorrelator;
+  private final EventCorrelatorObserver observer;
 
   public FailedEventReplayService(
       EventBufferRepository repository, EventCorrelator eventCorrelator) {
+    this(repository, eventCorrelator, EventCorrelatorObserver.NOOP);
+  }
+
+  public FailedEventReplayService(
+      EventBufferRepository repository,
+      EventCorrelator eventCorrelator,
+      EventCorrelatorObserver observer) {
     this.repository = Objects.requireNonNull(repository, "repository must not be null");
     this.eventCorrelator =
         Objects.requireNonNull(eventCorrelator, "eventCorrelator must not be null");
+    this.observer =
+        CompositeEventCorrelatorObserver.of(
+            List.of(Objects.requireNonNull(observer, "observer must not be null")));
   }
 
   /**
@@ -24,6 +36,8 @@ public final class FailedEventReplayService {
    */
   public Optional<EventCorrelationResult> replayFailed(String flowName, String eventId) {
     EventPointer pointer = new EventPointer(flowName, eventId);
-    return repository.claimFailedForRetry(pointer).map(eventCorrelator::replay);
+    Optional<BufferedEvent> event = repository.claimFailedForRetry(pointer);
+    observer.failedManualReplayClaimed(pointer, event.isPresent());
+    return event.map(eventCorrelator::replay);
   }
 }

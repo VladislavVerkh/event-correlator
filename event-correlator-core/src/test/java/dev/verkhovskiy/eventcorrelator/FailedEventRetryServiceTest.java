@@ -82,7 +82,67 @@ class FailedEventRetryServiceTest {
         .isEqualTo(EventStatus.PROCESSED);
   }
 
+  @Test
+  void notifiesObserverAboutClaimedRetryBatch() {
+    AtomicInteger claimedCount = new AtomicInteger();
+    TestEventBufferRepository repository = new TestEventBufferRepository();
+    EventCorrelator correlator =
+        new EventCorrelator() {
+          @Override
+          public EventCorrelationResult accept(IncomingEvent<?> event) {
+            throw new UnsupportedOperationException();
+          }
+
+          @Override
+          public EventCorrelationResult accept(RawIncomingEvent<?> event) {
+            throw new UnsupportedOperationException();
+          }
+
+          @Override
+          public EventCorrelationResult replay(BufferedEvent event) {
+            return EventCorrelationResult.processed(event.pointer());
+          }
+        };
+    EventCorrelatorObserver observer =
+        new EventCorrelatorObserver() {
+          @Override
+          public void failedRetryClaimed(int count) {
+            claimedCount.set(count);
+          }
+        };
+    repository.insertIfAbsent(failedEvent());
+    repository.markFailed(
+        new EventPointer("contract-events", "event-1"),
+        "temporary failure",
+        Instant.parse("2026-01-01T00:00:00Z"),
+        2);
+    FailedEventRetryService retryService =
+        new FailedEventRetryService(
+            repository,
+            correlator,
+            Clock.fixed(Instant.parse("2026-01-01T00:00:01Z"), ZoneOffset.UTC),
+            10,
+            observer);
+
+    retryService.runOnce();
+
+    assertThat(claimedCount).hasValue(1);
+  }
+
   private record ContractCreated(String contractId) {}
+
+  private BufferedEvent failedEvent() {
+    return new BufferedEvent(
+        "contract-events",
+        "contract.created",
+        "event-1",
+        "contract-1",
+        new ContractCreated("contract-1"),
+        Map.of(),
+        null,
+        Instant.parse("2026-01-01T00:00:00Z"),
+        EventStatus.RECEIVED);
+  }
 
   private static final class TestEventBufferRepository implements EventBufferRepository {
     private final Map<EventPointer, BufferedEvent> events = new LinkedHashMap<>();
