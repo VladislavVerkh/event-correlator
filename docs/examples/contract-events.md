@@ -121,11 +121,10 @@ Listener дочернего события:
 @KafkaListener(topics = "payment-schedule-events")
 void onPaymentScheduleChanged(PaymentScheduleChanged payload) {
   eventCorrelator.accept(
-      IncomingEvent.<PaymentScheduleChanged>builder()
+      RawIncomingEvent.<PaymentScheduleChanged>builder()
           .flowName("contract-events")
           .eventType("payment.schedule.changed")
           .eventId(payload.eventId())
-          .correlationKey(payload.contractId())
           .payload(payload)
           .receivedAt(Instant.now())
           .build());
@@ -138,15 +137,21 @@ Listener root-события:
 @KafkaListener(topics = "contract-events")
 void onContractCreated(ContractCreated payload) {
   eventCorrelator.accept(
-      IncomingEvent.<ContractCreated>builder()
+      RawIncomingEvent.<ContractCreated>builder()
           .flowName("contract-events")
           .eventType("contract.created")
           .eventId(payload.eventId())
-          .correlationKey(payload.contractId())
           .payload(payload)
           .receivedAt(Instant.now())
           .build());
 }
+```
+
+В этих примерах listener не передает `correlationKey`: correlator берет его из extractor-а,
+описанного в definition:
+
+```java
+.correlationKey(PaymentScheduleChanged::contractId)
 ```
 
 `handlers.applyContract(...)` не вызывается напрямую из listener-а. Он указан в `rootEvent(...)` и

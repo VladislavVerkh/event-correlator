@@ -44,6 +44,10 @@ public final class EventTypeDefinition<T> {
     return correlationKeyExtractor.apply(payload);
   }
 
+  String correlationKeyUntyped(Object payload) {
+    return correlationKey(payloadClass.cast(payload));
+  }
+
   public void handle(T payload) {
     handler.handle(payload);
   }

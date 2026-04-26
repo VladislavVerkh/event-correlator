@@ -4,4 +4,6 @@ package dev.verkhovskiy.eventcorrelator;
 public interface EventCorrelator {
 
   EventCorrelationResult accept(IncomingEvent<?> event);
+
+  EventCorrelationResult accept(RawIncomingEvent<?> event);
 }

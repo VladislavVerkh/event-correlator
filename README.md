@@ -66,11 +66,10 @@ Transport adapter, например Kafka listener, нормализует ка�
 
 ```java
 eventCorrelator.accept(
-    IncomingEvent.<PaymentScheduleChanged>builder()
+    RawIncomingEvent.<PaymentScheduleChanged>builder()
         .flowName("contract-events")
         .eventType("payment.schedule.changed")
         .eventId(kafkaEventId)
-        .correlationKey(payload.contractId())
         .payload(payload)
         .receivedAt(Instant.now())
         .build());
@@ -80,15 +79,18 @@ eventCorrelator.accept(
 
 ```java
 eventCorrelator.accept(
-    IncomingEvent.<ContractCreated>builder()
+    RawIncomingEvent.<ContractCreated>builder()
         .flowName("contract-events")
         .eventType("contract.created")
         .eventId(kafkaEventId)
-        .correlationKey(payload.contractId())
         .payload(payload)
         .receivedAt(Instant.now())
         .build());
 ```
+
+Для `RawIncomingEvent` correlator сам вычисляет `correlationKey` через extractor, заданный в
+`EventFlowDefinition`. Если transport adapter уже вычислил business key сам, можно использовать
+`IncomingEvent` и передать `correlationKey` явно.
 
 Listener не должен напрямую вызывать `handlers.applyContract(...)`. Root handler вызывается внутри
 correlator-а, после сохранения root-события в durable inbox. После успешной обработки root-события

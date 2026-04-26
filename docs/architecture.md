@@ -1,8 +1,10 @@
 # Архитектура
 
 `event-correlator` решает задачу durable-корреляции входящих событий. Он не привязан к Kafka,
-RabbitMQ или другому транспорту: транспортный adapter должен создать `IncomingEvent` и вызвать
-`EventCorrelator.accept(...)`.
+RabbitMQ или другому транспорту: transport adapter обычно создает `RawIncomingEvent` и вызывает
+`EventCorrelator.accept(...)`. Correlator сам вычисляет `correlationKey` через extractor из
+`EventFlowDefinition`. Если adapter уже вычислил business key, он может передать готовый
+`IncomingEvent`.
 
 Это правило применяется ко всем событиям одного flow, включая root-событие. Root-событие нельзя
 обрабатывать напрямую в listener-е, потому что correlator должен сначала сохранить его в durable
@@ -14,7 +16,7 @@ inbox, пометить как `PROCESSED`, а затем повторно пр�
 ```text
 Kafka/Rabbit/HTTP listener
   |
-  | builds IncomingEvent
+  | builds RawIncomingEvent
   v
 EventCorrelator
   |
@@ -137,7 +139,7 @@ PostgreSQL implementation использует `for update skip locked`, поэ�
 Приложение отвечает за:
 
 - чтение сообщений из транспорта;
-- выбор `eventId`, `eventType` и `correlationKey`;
+- выбор `eventId` и `eventType`;
 - вызов `EventCorrelator.accept(...)` для root и дочерних событий;
 - бизнес-обработчики;
 - миграции и транзакционные границы;

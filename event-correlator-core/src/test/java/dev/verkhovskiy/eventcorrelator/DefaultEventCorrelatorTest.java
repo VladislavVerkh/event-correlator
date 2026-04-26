@@ -118,6 +118,33 @@ class DefaultEventCorrelatorTest {
     assertThat(boundary.correlationKey).isEqualTo("contract-1");
   }
 
+  @Test
+  void derivesCorrelationKeyForRawIncomingEvent() {
+    EventFlowDefinition flow =
+        EventFlowDefinition.builder("contract-events")
+            .rootEvent(
+                "contract.created",
+                ContractCreated.class,
+                payload -> "derived:" + payload.contractId(),
+                payload -> {})
+            .build();
+    TestEventBufferRepository repository = new TestEventBufferRepository();
+    EventCorrelator correlator = correlator(flow, repository);
+
+    EventCorrelationResult result =
+        correlator.accept(
+            RawIncomingEvent.<ContractCreated>builder()
+                .flowName("contract-events")
+                .eventType("contract.created")
+                .eventId("event-1")
+                .payload(new ContractCreated("contract-1"))
+                .receivedAt(Instant.parse("2026-01-01T00:00:00Z"))
+                .build());
+
+    assertThat(result.status()).isEqualTo(EventCorrelationStatus.PROCESSED);
+    assertThat(repository.correlationKey("event-1")).isEqualTo("derived:contract-1");
+  }
+
   private EventCorrelator correlator(
       EventFlowDefinition flow, TestEventBufferRepository repository) {
     return new DefaultEventCorrelator(
@@ -208,6 +235,14 @@ class DefaultEventCorrelatorTest {
           .findFirst()
           .orElseThrow()
           .status();
+    }
+
+    String correlationKey(String eventId) {
+      return events.values().stream()
+          .filter(event -> event.eventId().equals(eventId))
+          .findFirst()
+          .orElseThrow()
+          .correlationKey();
     }
 
     private void update(EventPointer pointer, EventStatus status) {

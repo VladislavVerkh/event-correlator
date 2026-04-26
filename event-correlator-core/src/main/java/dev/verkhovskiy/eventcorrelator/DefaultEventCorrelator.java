@@ -42,6 +42,28 @@ public class DefaultEventCorrelator implements EventCorrelator {
         () -> acceptInsideBoundary(event, flow, definition));
   }
 
+  @Override
+  public EventCorrelationResult accept(RawIncomingEvent<?> event) {
+    Objects.requireNonNull(event, "event must not be null");
+    EventFlowDefinition flow = definitionRegistry.requireFlow(event.flowName());
+    EventTypeDefinition<?> definition = flow.requireEvent(event.eventType());
+    IncomingEvent<?> correlatedEvent = correlateEvent(event, definition);
+    return accept(correlatedEvent);
+  }
+
+  private IncomingEvent<?> correlateEvent(
+      RawIncomingEvent<?> event, EventTypeDefinition<?> definition) {
+    return new IncomingEvent<>(
+        event.flowName(),
+        event.eventType(),
+        event.eventId(),
+        definition.correlationKeyUntyped(event.payload()),
+        event.payload(),
+        event.headers(),
+        event.occurredAt(),
+        event.receivedAt());
+  }
+
   private EventCorrelationResult acceptInsideBoundary(
       IncomingEvent<?> event, EventFlowDefinition flow, EventTypeDefinition<?> definition) {
     BufferedEvent bufferedEvent = BufferedEvent.received(event);
