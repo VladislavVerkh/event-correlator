@@ -16,6 +16,8 @@ public class InMemoryEventBufferRepository implements EventBufferRepository {
 
   private final Map<EventPointer, BufferedEvent> events = new LinkedHashMap<>();
   private final Map<EventPointer, Instant> expiresAtByPointer = new LinkedHashMap<>();
+  private final Map<EventPointer, Instant> nextRetryAtByPointer = new LinkedHashMap<>();
+  private final Map<EventPointer, Integer> attemptsByPointer = new LinkedHashMap<>();
 
   @Override
   public synchronized boolean insertIfAbsent(BufferedEvent event) {
@@ -39,14 +41,23 @@ public class InMemoryEventBufferRepository implements EventBufferRepository {
   }
 
   @Override
-  public synchronized void markFailed(EventPointer pointer, String failureMessage) {
+  public synchronized void markFailed(
+      EventPointer pointer, String failureMessage, Instant nextRetryAt, int maxAttempts) {
     expiresAtByPointer.remove(pointer);
+    int nextAttempts = attemptsByPointer.getOrDefault(pointer, 0) + 1;
+    attemptsByPointer.put(pointer, nextAttempts);
+    if (nextAttempts < maxAttempts) {
+      nextRetryAtByPointer.put(pointer, nextRetryAt);
+    } else {
+      nextRetryAtByPointer.remove(pointer);
+    }
     updateStatus(pointer, EventStatus.FAILED);
   }
 
   @Override
   public synchronized void markExpired(EventPointer pointer) {
     expiresAtByPointer.remove(pointer);
+    nextRetryAtByPointer.remove(pointer);
     updateStatus(pointer, EventStatus.EXPIRED);
   }
 
@@ -92,6 +103,24 @@ public class InMemoryEventBufferRepository implements EventBufferRepository {
     return expiredPointers.size();
   }
 
+  @Override
+  public synchronized List<BufferedEvent> claimFailedReadyForRetry(Instant now, int limit) {
+    List<EventPointer> retryPointers =
+        events.values().stream()
+            .filter(event -> event.status() == EventStatus.FAILED)
+            .filter(event -> isReadyForRetry(event.pointer(), now))
+            .sorted(Comparator.comparing(event -> nextRetryAtByPointer.get(event.pointer())))
+            .limit(limit)
+            .map(BufferedEvent::pointer)
+            .toList();
+    retryPointers.forEach(
+        pointer -> {
+          nextRetryAtByPointer.remove(pointer);
+          updateStatus(pointer, EventStatus.PENDING);
+        });
+    return retryPointers.stream().map(events::get).toList();
+  }
+
   private void updateStatus(EventPointer pointer, EventStatus status) {
     BufferedEvent event = events.get(pointer);
     if (event == null) {
@@ -103,5 +132,10 @@ public class InMemoryEventBufferRepository implements EventBufferRepository {
   private boolean isExpired(EventPointer pointer, Instant now) {
     Instant expiresAt = expiresAtByPointer.get(pointer);
     return expiresAt != null && !expiresAt.isAfter(now);
+  }
+
+  private boolean isReadyForRetry(EventPointer pointer, Instant now) {
+    Instant nextRetryAt = nextRetryAtByPointer.get(pointer);
+    return nextRetryAt != null && !nextRetryAt.isAfter(now);
   }
 }

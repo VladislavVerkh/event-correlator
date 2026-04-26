@@ -44,7 +44,8 @@ class PendingEventExpirationServiceTest {
     }
 
     @Override
-    public void markFailed(EventPointer pointer, String failureMessage) {
+    public void markFailed(
+        EventPointer pointer, String failureMessage, Instant nextRetryAt, int maxAttempts) {
       throw new UnsupportedOperationException();
     }
 
@@ -68,6 +69,11 @@ class PendingEventExpirationServiceTest {
       this.now = now;
       this.limit = limit;
       return 3;
+    }
+
+    @Override
+    public List<BufferedEvent> claimFailedReadyForRetry(Instant now, int limit) {
+      throw new UnsupportedOperationException();
     }
   }
 }

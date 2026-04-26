@@ -97,6 +97,7 @@ public class PostgresEventBufferRepository implements EventBufferRepository {
         set status = :status,
             pending_reason = :reason,
             expires_at = :expiresAt,
+            next_retry_at = null,
             updated_at = now()
         where flow_name = :flowName and event_id = :eventId
         """;
@@ -123,11 +124,17 @@ public class PostgresEventBufferRepository implements EventBufferRepository {
   }
 
   @Override
-  public void markFailed(EventPointer pointer, String failureMessage) {
+  public void markFailed(
+      EventPointer pointer, String failureMessage, Instant nextRetryAt, int maxAttempts) {
     String sql =
         """
         update ec_event_inbox
         set status = :status,
+            attempts = attempts + 1,
+            next_retry_at = case
+              when attempts + 1 < :maxAttempts then :nextRetryAt
+              else null
+            end,
             failure_message = :failureMessage,
             failed_at = now(),
             updated_at = now()
@@ -137,7 +144,9 @@ public class PostgresEventBufferRepository implements EventBufferRepository {
         sql,
         pointerParameters(pointer)
             .addValue("status", EventStatus.FAILED.name())
-            .addValue("failureMessage", failureMessage));
+            .addValue("failureMessage", failureMessage)
+            .addValue("nextRetryAt", timestamp(nextRetryAt))
+            .addValue("maxAttempts", maxAttempts));
   }
 
   @Override
@@ -234,6 +243,61 @@ public class PostgresEventBufferRepository implements EventBufferRepository {
             .addValue("expiredStatus", EventStatus.EXPIRED.name())
             .addValue("now", timestamp(now))
             .addValue("limit", limit));
+  }
+
+  @Override
+  public List<BufferedEvent> claimFailedReadyForRetry(Instant now, int limit) {
+    String sql =
+        """
+        with retryable as (
+          select flow_name, event_id
+          from ec_event_inbox
+          where status = :failedStatus
+            and next_retry_at is not null
+            and next_retry_at <= :now
+          order by next_retry_at, failed_at, received_at
+          limit :limit
+          for update skip locked
+        ),
+        claimed as (
+          update ec_event_inbox event
+          set status = :pendingStatus,
+              pending_reason = 'retry scheduled',
+              next_retry_at = null,
+              updated_at = now()
+          from retryable
+          where event.flow_name = retryable.flow_name
+            and event.event_id = retryable.event_id
+          returning event.flow_name,
+                    event.event_id,
+                    event.event_type,
+                    event.correlation_key,
+                    event.payload_json::text as payload_json,
+                    event.headers_json::text as headers_json,
+                    event.occurred_at,
+                    event.received_at,
+                    event.status
+        )
+        select flow_name,
+               event_id,
+               event_type,
+               correlation_key,
+               payload_json,
+               headers_json,
+               occurred_at,
+               received_at,
+               status
+        from claimed
+        order by received_at
+        """;
+    return jdbcTemplate.query(
+        sql,
+        new MapSqlParameterSource()
+            .addValue("failedStatus", EventStatus.FAILED.name())
+            .addValue("pendingStatus", EventStatus.PENDING.name())
+            .addValue("now", timestamp(now))
+            .addValue("limit", limit),
+        rowMapper());
   }
 
   private RowMapper<BufferedEvent> rowMapper() {

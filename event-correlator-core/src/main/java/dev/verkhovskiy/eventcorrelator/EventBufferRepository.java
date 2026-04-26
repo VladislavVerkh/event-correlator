@@ -26,8 +26,11 @@ public interface EventBufferRepository {
   /** Помечает событие как успешно обработанное. */
   void markProcessed(EventPointer pointer);
 
-  /** Помечает событие как неуспешно обработанное. */
-  void markFailed(EventPointer pointer, String failureMessage);
+  /**
+   * Помечает событие как неуспешно обработанное и, если attempts еще не исчерпаны, планирует retry.
+   */
+  void markFailed(
+      EventPointer pointer, String failureMessage, Instant nextRetryAt, int maxAttempts);
 
   /** Помечает событие как просроченное. */
   void markExpired(EventPointer pointer);
@@ -46,4 +49,13 @@ public interface EventBufferRepository {
    * @return количество просроченных событий
    */
   int expirePendingBefore(Instant now, int limit);
+
+  /**
+   * Захватывает failed-события, у которых наступило время retry.
+   *
+   * @param now текущий момент
+   * @param limit максимальный размер batch
+   * @return события, которые нужно повторно обработать
+   */
+  List<BufferedEvent> claimFailedReadyForRetry(Instant now, int limit);
 }

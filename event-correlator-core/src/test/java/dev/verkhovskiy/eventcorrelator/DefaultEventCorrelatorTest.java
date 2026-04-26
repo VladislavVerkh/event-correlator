@@ -192,7 +192,8 @@ class DefaultEventCorrelatorTest {
     }
 
     @Override
-    public void markFailed(EventPointer pointer, String failureMessage) {
+    public void markFailed(
+        EventPointer pointer, String failureMessage, Instant nextRetryAt, int maxAttempts) {
       update(pointer, EventStatus.FAILED);
     }
 
@@ -227,6 +228,11 @@ class DefaultEventCorrelatorTest {
     @Override
     public int expirePendingBefore(Instant now, int limit) {
       return 0;
+    }
+
+    @Override
+    public List<BufferedEvent> claimFailedReadyForRetry(Instant now, int limit) {
+      return List.of();
     }
 
     EventStatus status(String eventId) {

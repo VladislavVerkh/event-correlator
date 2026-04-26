@@ -111,6 +111,36 @@ event.correlator.expiration-batch-size=100
 PostgreSQL implementation использует `for update skip locked`, поэтому несколько экземпляров
 приложения могут запускать expiration параллельно без обработки одного и того же batch.
 
+## Retry failed-событий
+
+Если handler выбрасывает `RuntimeException`, correlator переводит событие в `FAILED`, увеличивает
+`attempts` и, если лимит попыток еще не исчерпан, сохраняет `next_retry_at`.
+
+Retry не запускается сам по себе. Приложение задает расписание:
+
+```java
+@Scheduled(fixedDelayString = "PT30S")
+void retryFailedEvents() {
+  failedEventRetryService.runOnce();
+}
+```
+
+`FailedEventRetryService` batch-ом захватывает события, у которых `next_retry_at <= now`, и вызывает
+`EventCorrelator.replay(...)`. Replay не создает новое inbox-событие и не проходит через duplicate
+check: он повторно обрабатывает уже сохраненный payload.
+
+Основные свойства:
+
+```properties
+event.correlator.failure-max-attempts=1
+event.correlator.failure-retry-delay=PT1M
+event.correlator.failed-retry-batch-size=100
+```
+
+`failure-max-attempts=1` означает: первая ошибка сразу оставляет событие в `FAILED` без retry. Чтобы
+включить повторы, задайте значение больше `1`. Например, `3` означает первичную попытку и две
+повторные попытки.
+
 ## Валидация definitions
 
 `EventFlowDefinition` проверяется при `build()` и при регистрации в `EventDefinitionRegistry`.

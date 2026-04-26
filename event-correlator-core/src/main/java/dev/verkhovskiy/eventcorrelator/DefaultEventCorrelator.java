@@ -13,10 +13,16 @@ public class DefaultEventCorrelator implements EventCorrelator {
   private final EventBufferRepository repository;
   private final Clock clock;
   private final EventCorrelationBoundary boundary;
+  private final EventFailureRetryPolicy failureRetryPolicy;
 
   public DefaultEventCorrelator(
       EventDefinitionRegistry definitionRegistry, EventBufferRepository repository, Clock clock) {
-    this(definitionRegistry, repository, clock, new DirectEventCorrelationBoundary());
+    this(
+        definitionRegistry,
+        repository,
+        clock,
+        new DirectEventCorrelationBoundary(),
+        EventFailureRetryPolicy.noRetries());
   }
 
   public DefaultEventCorrelator(
@@ -24,11 +30,22 @@ public class DefaultEventCorrelator implements EventCorrelator {
       EventBufferRepository repository,
       Clock clock,
       EventCorrelationBoundary boundary) {
+    this(definitionRegistry, repository, clock, boundary, EventFailureRetryPolicy.noRetries());
+  }
+
+  public DefaultEventCorrelator(
+      EventDefinitionRegistry definitionRegistry,
+      EventBufferRepository repository,
+      Clock clock,
+      EventCorrelationBoundary boundary,
+      EventFailureRetryPolicy failureRetryPolicy) {
     this.definitionRegistry =
         Objects.requireNonNull(definitionRegistry, "definitionRegistry must not be null");
     this.repository = Objects.requireNonNull(repository, "repository must not be null");
     this.clock = Objects.requireNonNull(clock, "clock must not be null");
     this.boundary = Objects.requireNonNull(boundary, "boundary must not be null");
+    this.failureRetryPolicy =
+        Objects.requireNonNull(failureRetryPolicy, "failureRetryPolicy must not be null");
   }
 
   @Override
@@ -49,6 +66,23 @@ public class DefaultEventCorrelator implements EventCorrelator {
     EventTypeDefinition<?> definition = flow.requireEvent(event.eventType());
     IncomingEvent<?> correlatedEvent = correlateEvent(event, definition);
     return accept(correlatedEvent);
+  }
+
+  @Override
+  public EventCorrelationResult replay(BufferedEvent event) {
+    Objects.requireNonNull(event, "event must not be null");
+    EventFlowDefinition flow = definitionRegistry.requireFlow(event.flowName());
+    EventTypeDefinition<?> definition = flow.requireEvent(event.eventType());
+    return boundary.execute(
+        event.flowName(),
+        event.correlationKey(),
+        () -> {
+          EventCorrelationResult result = correlate(flow, definition, event);
+          if (result.status() == EventCorrelationStatus.PROCESSED) {
+            drainPending(flow, event.correlationKey());
+          }
+          return result;
+        });
   }
 
   private IncomingEvent<?> correlateEvent(
@@ -94,7 +128,9 @@ public class DefaultEventCorrelator implements EventCorrelator {
       repository.markProcessed(event.pointer());
       return EventCorrelationResult.processed(event.pointer());
     } catch (RuntimeException e) {
-      repository.markFailed(event.pointer(), e.getMessage());
+      Instant nextRetryAt = Instant.now(clock).plus(failureRetryPolicy.retryDelay());
+      repository.markFailed(
+          event.pointer(), e.getMessage(), nextRetryAt, failureRetryPolicy.maxAttempts());
       return EventCorrelationResult.failed(event.pointer(), e.getMessage());
     }
   }

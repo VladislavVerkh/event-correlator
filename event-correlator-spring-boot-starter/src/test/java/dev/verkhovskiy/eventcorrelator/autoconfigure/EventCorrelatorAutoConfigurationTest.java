@@ -7,7 +7,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.verkhovskiy.eventcorrelator.EventCorrelationBoundary;
 import dev.verkhovskiy.eventcorrelator.EventCorrelator;
 import dev.verkhovskiy.eventcorrelator.EventDefinitionRegistry;
+import dev.verkhovskiy.eventcorrelator.EventFailureRetryPolicy;
 import dev.verkhovskiy.eventcorrelator.EventFlowDefinition;
+import dev.verkhovskiy.eventcorrelator.FailedEventRetryService;
 import dev.verkhovskiy.eventcorrelator.PendingEventExpirationService;
 import dev.verkhovskiy.eventcorrelator.postgres.PostgresEventBufferRepository;
 import dev.verkhovskiy.eventcorrelator.postgres.PostgresEventCorrelationLock;
@@ -34,9 +36,11 @@ class EventCorrelatorAutoConfigurationTest {
               assertThat(context).hasSingleBean(PostgresEventCorrelationLock.class);
               assertThat(context).hasSingleBean(TransactionTemplate.class);
               assertThat(context).hasSingleBean(EventCorrelationBoundary.class);
+              assertThat(context).hasSingleBean(EventFailureRetryPolicy.class);
               assertThat(context).hasSingleBean(PostgresEventBufferRepository.class);
               assertThat(context).hasSingleBean(EventCorrelator.class);
               assertThat(context).hasSingleBean(PendingEventExpirationService.class);
+              assertThat(context).hasSingleBean(FailedEventRetryService.class);
             });
   }
 

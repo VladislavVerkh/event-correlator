@@ -2,11 +2,14 @@ package dev.verkhovskiy.eventcorrelator.autoconfigure;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.verkhovskiy.eventcorrelator.DefaultEventCorrelator;
+import dev.verkhovskiy.eventcorrelator.DirectEventCorrelationBoundary;
 import dev.verkhovskiy.eventcorrelator.EventBufferRepository;
 import dev.verkhovskiy.eventcorrelator.EventCorrelationBoundary;
 import dev.verkhovskiy.eventcorrelator.EventCorrelator;
 import dev.verkhovskiy.eventcorrelator.EventDefinitionRegistry;
+import dev.verkhovskiy.eventcorrelator.EventFailureRetryPolicy;
 import dev.verkhovskiy.eventcorrelator.EventFlowDefinition;
+import dev.verkhovskiy.eventcorrelator.FailedEventRetryService;
 import dev.verkhovskiy.eventcorrelator.PendingEventExpirationService;
 import dev.verkhovskiy.eventcorrelator.postgres.PostgresEventBufferRepository;
 import dev.verkhovskiy.eventcorrelator.postgres.PostgresEventCorrelationLock;
@@ -75,6 +78,13 @@ public class EventCorrelatorAutoConfiguration {
 
   @Bean
   @ConditionalOnMissingBean
+  EventFailureRetryPolicy eventFailureRetryPolicy(EventCorrelatorProperties properties) {
+    return new EventFailureRetryPolicy(
+        properties.getFailureMaxAttempts(), properties.getFailureRetryDelay());
+  }
+
+  @Bean
+  @ConditionalOnMissingBean
   @ConditionalOnClass(NamedParameterJdbcTemplate.class)
   @ConditionalOnBean({
     NamedParameterJdbcTemplate.class,
@@ -95,13 +105,19 @@ public class EventCorrelatorAutoConfiguration {
       EventDefinitionRegistry definitionRegistry,
       EventBufferRepository repository,
       Clock clock,
-      ObjectProvider<EventCorrelationBoundary> boundary) {
+      ObjectProvider<EventCorrelationBoundary> boundary,
+      EventFailureRetryPolicy failureRetryPolicy) {
     EventCorrelationBoundary eventCorrelationBoundary = boundary.getIfAvailable();
     if (eventCorrelationBoundary == null) {
-      return new DefaultEventCorrelator(definitionRegistry, repository, clock);
+      return new DefaultEventCorrelator(
+          definitionRegistry,
+          repository,
+          clock,
+          new DirectEventCorrelationBoundary(),
+          failureRetryPolicy);
     }
     return new DefaultEventCorrelator(
-        definitionRegistry, repository, clock, eventCorrelationBoundary);
+        definitionRegistry, repository, clock, eventCorrelationBoundary, failureRetryPolicy);
   }
 
   @Bean
@@ -111,5 +127,17 @@ public class EventCorrelatorAutoConfiguration {
       EventBufferRepository repository, Clock clock, EventCorrelatorProperties properties) {
     return new PendingEventExpirationService(
         repository, clock, properties.getExpirationBatchSize());
+  }
+
+  @Bean
+  @ConditionalOnMissingBean
+  @ConditionalOnBean({EventBufferRepository.class, EventCorrelator.class, Clock.class})
+  FailedEventRetryService failedEventRetryService(
+      EventBufferRepository repository,
+      EventCorrelator eventCorrelator,
+      Clock clock,
+      EventCorrelatorProperties properties) {
+    return new FailedEventRetryService(
+        repository, eventCorrelator, clock, properties.getFailedRetryBatchSize());
   }
 }

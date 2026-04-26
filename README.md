@@ -19,6 +19,7 @@
 - PostgreSQL repository и Flyway migration для `ec_event_inbox`;
 - Spring Boot autoconfiguration;
 - `PendingEventExpirationService` для перевода просроченных orphan events в `EXPIRED`;
+- `FailedEventRetryService` для повторной обработки transient failures;
 - testkit с in-memory repository.
 
 ## Модули
@@ -104,6 +105,22 @@ correlator повторно проверяет pending-события по то�
 void expirePendingEvents() {
   pendingEventExpirationService.runOnce();
 }
+```
+
+Для retry failed-событий приложение тоже задает расписание:
+
+```java
+@Scheduled(fixedDelayString = "PT30S")
+void retryFailedEvents() {
+  failedEventRetryService.runOnce();
+}
+```
+
+По умолчанию `failure-max-attempts=1`, то есть retries выключены. Чтобы включить retries:
+
+```properties
+event.correlator.failure-max-attempts=3
+event.correlator.failure-retry-delay=PT1M
 ```
 
 ## Сборка
