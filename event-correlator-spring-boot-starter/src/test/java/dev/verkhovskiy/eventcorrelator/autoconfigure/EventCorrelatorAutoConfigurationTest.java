@@ -10,6 +10,7 @@ import dev.verkhovskiy.eventcorrelator.EventDefinitionRegistry;
 import dev.verkhovskiy.eventcorrelator.EventFailureRetryPolicy;
 import dev.verkhovskiy.eventcorrelator.EventFlowDefinition;
 import dev.verkhovskiy.eventcorrelator.EventInboxInspector;
+import dev.verkhovskiy.eventcorrelator.FailedEventReplayService;
 import dev.verkhovskiy.eventcorrelator.FailedEventRetryService;
 import dev.verkhovskiy.eventcorrelator.PendingEventExpirationService;
 import dev.verkhovskiy.eventcorrelator.postgres.PostgresEventBufferRepository;
@@ -43,6 +44,7 @@ class EventCorrelatorAutoConfigurationTest {
               assertThat(context).hasSingleBean(EventCorrelator.class);
               assertThat(context).hasSingleBean(PendingEventExpirationService.class);
               assertThat(context).hasSingleBean(FailedEventRetryService.class);
+              assertThat(context).hasSingleBean(FailedEventReplayService.class);
             });
   }
 

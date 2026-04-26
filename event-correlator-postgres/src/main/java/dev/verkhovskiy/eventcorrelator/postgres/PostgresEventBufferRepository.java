@@ -17,6 +17,7 @@ import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
@@ -298,6 +299,58 @@ public class PostgresEventBufferRepository implements EventBufferRepository {
             .addValue("now", timestamp(now))
             .addValue("limit", limit),
         rowMapper());
+  }
+
+  @Override
+  public Optional<BufferedEvent> claimFailedForRetry(EventPointer pointer) {
+    String sql =
+        """
+        with retryable as (
+          select flow_name, event_id
+          from ec_event_inbox
+          where flow_name = :flowName
+            and event_id = :eventId
+            and status = :failedStatus
+          for update skip locked
+        ),
+        claimed as (
+          update ec_event_inbox event
+          set status = :pendingStatus,
+              pending_reason = 'manual retry requested',
+              next_retry_at = null,
+              updated_at = now()
+          from retryable
+          where event.flow_name = retryable.flow_name
+            and event.event_id = retryable.event_id
+          returning event.flow_name,
+                    event.event_id,
+                    event.event_type,
+                    event.correlation_key,
+                    event.payload_json::text as payload_json,
+                    event.headers_json::text as headers_json,
+                    event.occurred_at,
+                    event.received_at,
+                    event.status
+        )
+        select flow_name,
+               event_id,
+               event_type,
+               correlation_key,
+               payload_json,
+               headers_json,
+               occurred_at,
+               received_at,
+               status
+        from claimed
+        """;
+    List<BufferedEvent> events =
+        jdbcTemplate.query(
+            sql,
+            pointerParameters(pointer)
+                .addValue("failedStatus", EventStatus.FAILED.name())
+                .addValue("pendingStatus", EventStatus.PENDING.name()),
+            rowMapper());
+    return events.stream().findFirst();
   }
 
   private RowMapper<BufferedEvent> rowMapper() {

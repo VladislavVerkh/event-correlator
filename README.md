@@ -21,6 +21,7 @@
 - `EventInboxInspector` для диагностики событий в durable inbox;
 - `PendingEventExpirationService` для перевода просроченных orphan events в `EXPIRED`;
 - `FailedEventRetryService` для повторной обработки transient failures;
+- `FailedEventReplayService` для ручного replay конкретного failed-события;
 - testkit с in-memory repository.
 
 ## Модули
@@ -135,6 +136,15 @@ List<EventInboxRecord> failedEvents =
             .limit(100)
             .build());
 ```
+
+Если причина ошибки уже исправлена, конкретное `FAILED` событие можно повторить вручную:
+
+```java
+Optional<EventCorrelationResult> result =
+    failedEventReplayService.replayFailed("contract-events", "event-123");
+```
+
+`Optional.empty()` означает, что событие не найдено или сейчас не находится в статусе `FAILED`.
 
 ## Сборка
 

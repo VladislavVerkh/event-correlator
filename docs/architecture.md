@@ -161,6 +161,25 @@ List<EventInboxRecord> pendingEvents =
 большой или чувствительный payload. Для первого уровня диагностики доступны статус, `eventType`,
 `correlationKey`, `attempts`, `pendingReason`, `failureMessage` и временные метки.
 
+## Ручной replay failed-событий
+
+После диагностики оператору часто нужно повторить одно конкретное событие: например, downstream
+сервис восстановился, справочник был поправлен или бизнес-ошибка стала исправимой.
+
+Для этого используется `FailedEventReplayService`:
+
+```java
+Optional<EventCorrelationResult> result =
+    failedEventReplayService.replayFailed("contract-events", "event-123");
+```
+
+Сервис захватывает событие только если оно сейчас находится в статусе `FAILED`, переводит его во
+внутренний статус повторной обработки и вызывает `EventCorrelator.replay(...)`. Если событие не
+найдено, уже обработано или находится в другом статусе, возвращается `Optional.empty()`.
+
+PostgreSQL implementation использует `for update skip locked`, поэтому два оператора или два
+экземпляра приложения не должны одновременно повторно обработать одно и то же failed-событие.
+
 ## Валидация definitions
 
 `EventFlowDefinition` проверяется при `build()` и при регистрации в `EventDefinitionRegistry`.

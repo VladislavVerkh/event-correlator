@@ -10,6 +10,7 @@ import dev.verkhovskiy.eventcorrelator.EventDefinitionRegistry;
 import dev.verkhovskiy.eventcorrelator.EventFailureRetryPolicy;
 import dev.verkhovskiy.eventcorrelator.EventFlowDefinition;
 import dev.verkhovskiy.eventcorrelator.EventInboxInspector;
+import dev.verkhovskiy.eventcorrelator.FailedEventReplayService;
 import dev.verkhovskiy.eventcorrelator.FailedEventRetryService;
 import dev.verkhovskiy.eventcorrelator.PendingEventExpirationService;
 import dev.verkhovskiy.eventcorrelator.postgres.PostgresEventBufferRepository;
@@ -149,5 +150,13 @@ public class EventCorrelatorAutoConfiguration {
       EventCorrelatorProperties properties) {
     return new FailedEventRetryService(
         repository, eventCorrelator, clock, properties.getFailedRetryBatchSize());
+  }
+
+  @Bean
+  @ConditionalOnMissingBean
+  @ConditionalOnBean({EventBufferRepository.class, EventCorrelator.class})
+  FailedEventReplayService failedEventReplayService(
+      EventBufferRepository repository, EventCorrelator eventCorrelator) {
+    return new FailedEventReplayService(repository, eventCorrelator);
   }
 }

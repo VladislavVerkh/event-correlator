@@ -10,6 +10,7 @@ import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 /** In-memory repository для unit-тестов event-correlator flow. */
 public class InMemoryEventBufferRepository implements EventBufferRepository {
@@ -119,6 +120,17 @@ public class InMemoryEventBufferRepository implements EventBufferRepository {
           updateStatus(pointer, EventStatus.PENDING);
         });
     return retryPointers.stream().map(events::get).toList();
+  }
+
+  @Override
+  public synchronized Optional<BufferedEvent> claimFailedForRetry(EventPointer pointer) {
+    BufferedEvent event = events.get(pointer);
+    if (event == null || event.status() != EventStatus.FAILED) {
+      return Optional.empty();
+    }
+    nextRetryAtByPointer.remove(pointer);
+    updateStatus(pointer, EventStatus.PENDING);
+    return Optional.of(events.get(pointer));
   }
 
   private void updateStatus(EventPointer pointer, EventStatus status) {

@@ -10,6 +10,7 @@ import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.function.Supplier;
 import org.junit.jupiter.api.Test;
 
@@ -233,6 +234,11 @@ class DefaultEventCorrelatorTest {
     @Override
     public List<BufferedEvent> claimFailedReadyForRetry(Instant now, int limit) {
       return List.of();
+    }
+
+    @Override
+    public Optional<BufferedEvent> claimFailedForRetry(EventPointer pointer) {
+      return Optional.empty();
     }
 
     EventStatus status(String eventId) {

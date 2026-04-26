@@ -14,10 +14,10 @@ import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 
-class FailedEventRetryServiceTest {
+class FailedEventReplayServiceTest {
 
   @Test
-  void retriesFailedEventsWhenRetryTimeComes() {
+  void replaysFailedEventByPointer() {
     AtomicInteger calls = new AtomicInteger();
     EventFlowDefinition flow =
         EventFlowDefinition.builder("contract-events")
@@ -32,16 +32,14 @@ class FailedEventRetryServiceTest {
                 })
             .build();
     TestEventBufferRepository repository = new TestEventBufferRepository();
-    Clock clock = Clock.fixed(Instant.parse("2026-01-01T00:00:00Z"), ZoneOffset.UTC);
     EventCorrelator correlator =
         new DefaultEventCorrelator(
             new EventDefinitionRegistry(List.of(flow)),
             repository,
-            clock,
+            Clock.fixed(Instant.parse("2026-01-01T00:00:00Z"), ZoneOffset.UTC),
             new DirectEventCorrelationBoundary(),
-            new EventFailureRetryPolicy(2, Duration.ofSeconds(30)));
-    FailedEventRetryService retryService =
-        new FailedEventRetryService(repository, correlator, clock, 10);
+            new EventFailureRetryPolicy(1, Duration.ofSeconds(30)));
+    FailedEventReplayService replayService = new FailedEventReplayService(repository, correlator);
 
     EventCorrelationResult firstAttempt =
         correlator.accept(
@@ -55,31 +53,42 @@ class FailedEventRetryServiceTest {
                 .build());
 
     assertThat(firstAttempt.status()).isEqualTo(EventCorrelationStatus.FAILED);
-    assertThat(repository.events())
-        .singleElement()
-        .extracting(BufferedEvent::status)
-        .isEqualTo(EventStatus.FAILED);
 
-    int retried = retryService.runOnce();
+    Optional<EventCorrelationResult> replayResult =
+        replayService.replayFailed("contract-events", "event-1");
 
-    assertThat(retried).isZero();
-    assertThat(calls).hasValue(1);
-
-    retryService =
-        new FailedEventRetryService(
-            repository,
-            correlator,
-            Clock.fixed(Instant.parse("2026-01-01T00:00:31Z"), ZoneOffset.UTC),
-            10);
-
-    retried = retryService.runOnce();
-
-    assertThat(retried).isEqualTo(1);
+    assertThat(replayResult).isPresent();
+    assertThat(replayResult.orElseThrow().status()).isEqualTo(EventCorrelationStatus.PROCESSED);
     assertThat(calls).hasValue(2);
-    assertThat(repository.events())
-        .singleElement()
-        .extracting(BufferedEvent::status)
-        .isEqualTo(EventStatus.PROCESSED);
+    assertThat(repository.status("event-1")).isEqualTo(EventStatus.PROCESSED);
+  }
+
+  @Test
+  void returnsEmptyWhenEventIsNotFailed() {
+    TestEventBufferRepository repository = new TestEventBufferRepository();
+    EventCorrelator correlator =
+        new EventCorrelator() {
+          @Override
+          public EventCorrelationResult accept(IncomingEvent<?> event) {
+            throw new UnsupportedOperationException();
+          }
+
+          @Override
+          public EventCorrelationResult accept(RawIncomingEvent<?> event) {
+            throw new UnsupportedOperationException();
+          }
+
+          @Override
+          public EventCorrelationResult replay(BufferedEvent event) {
+            throw new UnsupportedOperationException();
+          }
+        };
+    FailedEventReplayService replayService = new FailedEventReplayService(repository, correlator);
+
+    Optional<EventCorrelationResult> replayResult =
+        replayService.replayFailed("contract-events", "event-1");
+
+    assertThat(replayResult).isEmpty();
   }
 
   private record ContractCreated(String contractId) {}
@@ -155,19 +164,7 @@ class FailedEventRetryServiceTest {
 
     @Override
     public List<BufferedEvent> claimFailedReadyForRetry(Instant now, int limit) {
-      List<EventPointer> pointers =
-          events.values().stream()
-              .filter(event -> event.status() == EventStatus.FAILED)
-              .filter(event -> isRetryReady(event.pointer(), now))
-              .limit(limit)
-              .map(BufferedEvent::pointer)
-              .toList();
-      pointers.forEach(
-          pointer -> {
-            nextRetryAtByPointer.remove(pointer);
-            update(pointer, EventStatus.PENDING);
-          });
-      return pointers.stream().map(events::get).toList();
+      return List.of();
     }
 
     @Override
@@ -181,13 +178,12 @@ class FailedEventRetryServiceTest {
       return Optional.of(events.get(pointer));
     }
 
-    List<BufferedEvent> events() {
-      return List.copyOf(events.values());
-    }
-
-    private boolean isRetryReady(EventPointer pointer, Instant now) {
-      Instant nextRetryAt = nextRetryAtByPointer.get(pointer);
-      return nextRetryAt != null && !nextRetryAt.isAfter(now);
+    EventStatus status(String eventId) {
+      return events.values().stream()
+          .filter(event -> event.eventId().equals(eventId))
+          .findFirst()
+          .orElseThrow()
+          .status();
     }
 
     private void update(EventPointer pointer, EventStatus status) {

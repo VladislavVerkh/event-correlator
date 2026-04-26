@@ -2,6 +2,7 @@ package dev.verkhovskiy.eventcorrelator;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 
 /** Durable repository для входящих и ожидающих событий. */
 public interface EventBufferRepository {
@@ -58,4 +59,12 @@ public interface EventBufferRepository {
    * @return события, которые нужно повторно обработать
    */
   List<BufferedEvent> claimFailedReadyForRetry(Instant now, int limit);
+
+  /**
+   * Захватывает одно failed-событие для ручной повторной обработки.
+   *
+   * @param pointer указатель на событие
+   * @return событие, если оно существует и сейчас находится в статусе `FAILED`
+   */
+  Optional<BufferedEvent> claimFailedForRetry(EventPointer pointer);
 }
