@@ -44,3 +44,47 @@ EventFlowDefinition contractEvents(ContractHandlers handlers) {
 5. pending-события по тому же `contractId` проверяются повторно и вызывают свои handlers.
 
 Если событие с тем же `eventId` пришло повторно, коррелятор вернет `DUPLICATE`.
+
+## Где вызывать accept
+
+`eventCorrelator.accept(...)` вызывается в listener-е каждого события flow. Это относится и к root
+event, и к дочерним событиям.
+
+Listener дочернего события:
+
+```java
+@KafkaListener(topics = "payment-schedule-events")
+void onPaymentScheduleChanged(PaymentScheduleChanged payload) {
+  eventCorrelator.accept(
+      IncomingEvent.<PaymentScheduleChanged>builder()
+          .flowName("contract-events")
+          .eventType("payment.schedule.changed")
+          .eventId(payload.eventId())
+          .correlationKey(payload.contractId())
+          .payload(payload)
+          .receivedAt(Instant.now())
+          .build());
+}
+```
+
+Listener root-события:
+
+```java
+@KafkaListener(topics = "contract-events")
+void onContractCreated(ContractCreated payload) {
+  eventCorrelator.accept(
+      IncomingEvent.<ContractCreated>builder()
+          .flowName("contract-events")
+          .eventType("contract.created")
+          .eventId(payload.eventId())
+          .correlationKey(payload.contractId())
+          .payload(payload)
+          .receivedAt(Instant.now())
+          .build());
+}
+```
+
+`handlers.applyContract(...)` не вызывается напрямую из listener-а. Он указан в `rootEvent(...)` и
+будет вызван самим correlator-ом после сохранения события. Это важно: только так correlator узнает,
+что dependency `contract.created` появилась, и сможет выпустить pending-события вроде
+`payment.schedule.changed` и `contract.attributes.changed`.

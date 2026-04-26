@@ -46,7 +46,10 @@ EventFlowDefinition contractEvents(ContractHandlers handlers) {
 }
 ```
 
-Transport adapter, например Kafka listener, нормализует сообщение и вызывает:
+Transport adapter, например Kafka listener, нормализует каждое сообщение и вызывает
+`eventCorrelator.accept(...)`.
+
+Дочернее событие:
 
 ```java
 eventCorrelator.accept(
@@ -60,6 +63,25 @@ eventCorrelator.accept(
         .build());
 ```
 
+Корневое событие тоже должно входить через correlator:
+
+```java
+eventCorrelator.accept(
+    IncomingEvent.<ContractCreated>builder()
+        .flowName("contract-events")
+        .eventType("contract.created")
+        .eventId(kafkaEventId)
+        .correlationKey(payload.contractId())
+        .payload(payload)
+        .receivedAt(Instant.now())
+        .build());
+```
+
+Listener не должен напрямую вызывать `handlers.applyContract(...)`. Root handler вызывается внутри
+correlator-а, после сохранения root-события в durable inbox. После успешной обработки root-события
+correlator повторно проверяет pending-события по тому же `correlationKey` и выпускает те, у которых
+теперь выполнены зависимости.
+
 ## Сборка
 
 ```bash
@@ -70,4 +92,3 @@ eventCorrelator.accept(
 
 - [Архитектура](docs/architecture.md)
 - [Пример contract events](docs/examples/contract-events.md)
-
