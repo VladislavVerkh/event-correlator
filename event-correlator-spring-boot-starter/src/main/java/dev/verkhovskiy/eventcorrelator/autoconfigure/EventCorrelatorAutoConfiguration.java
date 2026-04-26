@@ -7,6 +7,7 @@ import dev.verkhovskiy.eventcorrelator.EventCorrelationBoundary;
 import dev.verkhovskiy.eventcorrelator.EventCorrelator;
 import dev.verkhovskiy.eventcorrelator.EventDefinitionRegistry;
 import dev.verkhovskiy.eventcorrelator.EventFlowDefinition;
+import dev.verkhovskiy.eventcorrelator.PendingEventExpirationService;
 import dev.verkhovskiy.eventcorrelator.postgres.PostgresEventBufferRepository;
 import dev.verkhovskiy.eventcorrelator.postgres.PostgresEventCorrelationLock;
 import dev.verkhovskiy.eventcorrelator.postgres.SpringPostgresEventCorrelationBoundary;
@@ -101,5 +102,14 @@ public class EventCorrelatorAutoConfiguration {
     }
     return new DefaultEventCorrelator(
         definitionRegistry, repository, clock, eventCorrelationBoundary);
+  }
+
+  @Bean
+  @ConditionalOnMissingBean
+  @ConditionalOnBean({EventBufferRepository.class, Clock.class})
+  PendingEventExpirationService pendingEventExpirationService(
+      EventBufferRepository repository, Clock clock, EventCorrelatorProperties properties) {
+    return new PendingEventExpirationService(
+        repository, clock, properties.getExpirationBatchSize());
   }
 }

@@ -8,6 +8,7 @@ import dev.verkhovskiy.eventcorrelator.EventCorrelationBoundary;
 import dev.verkhovskiy.eventcorrelator.EventCorrelator;
 import dev.verkhovskiy.eventcorrelator.EventDefinitionRegistry;
 import dev.verkhovskiy.eventcorrelator.EventFlowDefinition;
+import dev.verkhovskiy.eventcorrelator.PendingEventExpirationService;
 import dev.verkhovskiy.eventcorrelator.postgres.PostgresEventBufferRepository;
 import dev.verkhovskiy.eventcorrelator.postgres.PostgresEventCorrelationLock;
 import org.junit.jupiter.api.Test;
@@ -35,6 +36,7 @@ class EventCorrelatorAutoConfigurationTest {
               assertThat(context).hasSingleBean(EventCorrelationBoundary.class);
               assertThat(context).hasSingleBean(PostgresEventBufferRepository.class);
               assertThat(context).hasSingleBean(EventCorrelator.class);
+              assertThat(context).hasSingleBean(PendingEventExpirationService.class);
             });
   }
 

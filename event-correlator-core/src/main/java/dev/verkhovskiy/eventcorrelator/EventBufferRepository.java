@@ -37,4 +37,13 @@ public interface EventBufferRepository {
 
   /** Возвращает pending-события по одному business key. */
   List<BufferedEvent> findPending(String flowName, String correlationKey);
+
+  /**
+   * Переводит просроченные pending-события в `EXPIRED`.
+   *
+   * @param now текущий момент
+   * @param limit максимальный размер batch
+   * @return количество просроченных событий
+   */
+  int expirePendingBefore(Instant now, int limit);
 }

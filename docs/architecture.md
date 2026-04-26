@@ -81,6 +81,34 @@ pg_advisory_xact_lock(hashtext(flow_name), hashtext(correlation_key))
 примененные бизнес-изменения перед выбросом исключения. Более строгая retry/rollback модель будет
 отдельным слоем развития.
 
+## Expiration pending-событий
+
+Когда событие не может быть обработано из-за отсутствующих dependencies, correlator переводит его в
+`PENDING` и сохраняет `expires_at`. Значение считается от `orphanRetention` текущего
+`EventFlowDefinition`.
+
+`PendingEventExpirationService` переводит просроченные pending-события в `EXPIRED` batch-ами:
+
+```java
+@Scheduled(fixedDelayString = "PT1M")
+void expirePendingEvents() {
+  pendingEventExpirationService.runOnce();
+}
+```
+
+Spring Boot starter создает `PendingEventExpirationService`, но не задает расписание сам.
+Приложение выбирает частоту запуска исходя из нагрузки и допустимой задержки диагностики orphan
+events.
+
+Размер batch настраивается свойством:
+
+```properties
+event.correlator.expiration-batch-size=100
+```
+
+PostgreSQL implementation использует `for update skip locked`, поэтому несколько экземпляров
+приложения могут запускать expiration параллельно без обработки одного и того же batch.
+
 ## Валидация definitions
 
 `EventFlowDefinition` проверяется при `build()` и при регистрации в `EventDefinitionRegistry`.

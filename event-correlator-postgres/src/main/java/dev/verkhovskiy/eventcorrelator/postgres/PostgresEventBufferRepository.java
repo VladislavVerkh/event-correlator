@@ -206,6 +206,36 @@ public class PostgresEventBufferRepository implements EventBufferRepository {
         rowMapper());
   }
 
+  @Override
+  public int expirePendingBefore(Instant now, int limit) {
+    String sql =
+        """
+        with expired as (
+          select flow_name, event_id
+          from ec_event_inbox
+          where status = :pendingStatus
+            and expires_at is not null
+            and expires_at <= :now
+          order by expires_at, received_at, created_at
+          limit :limit
+          for update skip locked
+        )
+        update ec_event_inbox event
+        set status = :expiredStatus,
+            updated_at = now()
+        from expired
+        where event.flow_name = expired.flow_name
+          and event.event_id = expired.event_id
+        """;
+    return jdbcTemplate.update(
+        sql,
+        new MapSqlParameterSource()
+            .addValue("pendingStatus", EventStatus.PENDING.name())
+            .addValue("expiredStatus", EventStatus.EXPIRED.name())
+            .addValue("now", timestamp(now))
+            .addValue("limit", limit));
+  }
+
   private RowMapper<BufferedEvent> rowMapper() {
     return (resultSet, rowNumber) -> mapEvent(resultSet);
   }

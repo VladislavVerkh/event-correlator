@@ -18,6 +18,7 @@
 - `EventBufferRepository` как storage contract;
 - PostgreSQL repository и Flyway migration для `ec_event_inbox`;
 - Spring Boot autoconfiguration;
+- `PendingEventExpirationService` для перевода просроченных orphan events в `EXPIRED`;
 - testkit с in-memory repository.
 
 ## Модули
@@ -93,6 +94,15 @@ Listener не должен напрямую вызывать `handlers.applyCont
 correlator-а, после сохранения root-события в durable inbox. После успешной обработки root-события
 correlator повторно проверяет pending-события по тому же `correlationKey` и выпускает те, у которых
 теперь выполнены зависимости.
+
+Для expiration просроченных pending-событий приложение задает расписание:
+
+```java
+@Scheduled(fixedDelayString = "PT1M")
+void expirePendingEvents() {
+  pendingEventExpirationService.runOnce();
+}
+```
 
 ## Сборка
 

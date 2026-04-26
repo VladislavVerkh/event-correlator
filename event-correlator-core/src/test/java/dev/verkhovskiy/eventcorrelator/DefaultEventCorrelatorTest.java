@@ -197,6 +197,11 @@ class DefaultEventCorrelatorTest {
           .toList();
     }
 
+    @Override
+    public int expirePendingBefore(Instant now, int limit) {
+      return 0;
+    }
+
     EventStatus status(String eventId) {
       return events.values().stream()
           .filter(event -> event.eventId().equals(eventId))
