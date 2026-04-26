@@ -76,6 +76,40 @@ Correlator проверяет именно статус `PROCESSED`, а не с�
 `payment.schedule.changed` уже пришел, но сам ожидает root-событие и еще не обработан, зависимость
 для `contract.ready.for.scoring` все еще считается невыполненной.
 
+## Порядок обработки pending-событий
+
+Если до root-события пришли несколько зависимых событий, после обработки root correlator проверит
+pending-события по тому же `contractId` в порядке их приема.
+
+Например, если события пришли так:
+
+```text
+contract.ready.for.scoring
+contract.attributes.changed
+payment.schedule.changed
+contract.created
+```
+
+После обработки `contract.created` возможный порядок handlers будет таким:
+
+```text
+handlers.applyContract(...)
+handlers.applyAttributes(...)
+handlers.applySchedule(...)
+handlers.sendToScoring(...)
+```
+
+`contract.ready.for.scoring` пришел первым, но его handler не будет вызван раньше
+`payment.schedule.changed`, потому что для scoring явно задана зависимость:
+
+```java
+.requires("payment.schedule.changed")
+```
+
+Если два pending-события зависят только от root и не зависят друг от друга, их относительный порядок
+определяется `receivedAt`. Для строгого бизнес-порядка нужно добавить явную зависимость через
+`.requires(...)`.
+
 ## Где вызывать accept
 
 `eventCorrelator.accept(...)` вызывается в listener-е каждого события flow. Это относится и к root
