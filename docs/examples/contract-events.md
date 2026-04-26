@@ -5,6 +5,7 @@
 - `contract.created`
 - `payment.schedule.changed`
 - `contract.attributes.changed`
+- `contract.ready.for.scoring`
 
 Все они связаны через `contractId`, но порядок доставки не гарантирован.
 
@@ -29,6 +30,12 @@ EventFlowDefinition contractEvents(ContractHandlers handlers) {
       .correlationKey(ContractAttributesChanged::contractId)
       .handler(handlers::applyAttributes)
       .add()
+      .event("contract.ready.for.scoring", ContractReadyForScoring.class)
+      .requires("contract.created")
+      .requires("payment.schedule.changed")
+      .correlationKey(ContractReadyForScoring::contractId)
+      .handler(handlers::sendToScoring)
+      .add()
       .build();
 }
 ```
@@ -44,6 +51,30 @@ EventFlowDefinition contractEvents(ContractHandlers handlers) {
 5. pending-события по тому же `contractId` проверяются повторно и вызывают свои handlers.
 
 Если событие с тем же `eventId` пришло повторно, коррелятор вернет `DUPLICATE`.
+
+## Несколько зависимостей
+
+Если событие можно обрабатывать только после нескольких других событий, `.requires(...)` вызывается
+несколько раз:
+
+```java
+.event("contract.ready.for.scoring", ContractReadyForScoring.class)
+.requires("contract.created")
+.requires("payment.schedule.changed")
+.correlationKey(ContractReadyForScoring::contractId)
+.handler(handlers::sendToScoring)
+.add()
+```
+
+`contract.ready.for.scoring` будет оставаться в статусе `PENDING`, пока по тому же `contractId` не
+будут успешно обработаны оба события:
+
+- `contract.created`;
+- `payment.schedule.changed`.
+
+Correlator проверяет именно статус `PROCESSED`, а не сам факт получения события. Если
+`payment.schedule.changed` уже пришел, но сам ожидает root-событие и еще не обработан, зависимость
+для `contract.ready.for.scoring` все еще считается невыполненной.
 
 ## Где вызывать accept
 

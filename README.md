@@ -41,10 +41,20 @@ EventFlowDefinition contractEvents(ContractHandlers handlers) {
       .correlationKey(PaymentScheduleChanged::contractId)
       .handler(handlers::applySchedule)
       .add()
+      .event("contract.ready.for.scoring", ContractReadyForScoring.class)
+      .requires("contract.created")
+      .requires("payment.schedule.changed")
+      .correlationKey(ContractReadyForScoring::contractId)
+      .handler(handlers::sendToScoring)
+      .add()
       .orphanRetention(Duration.ofDays(7))
       .build();
 }
 ```
+
+`.requires(...)` можно вызвать несколько раз. В этом случае событие останется `PENDING`, пока все
+указанные зависимости по тому же `correlationKey` не будут успешно обработаны и не получат статус
+`PROCESSED`.
 
 Transport adapter, например Kafka listener, нормализует каждое сообщение и вызывает
 `eventCorrelator.accept(...)`.
