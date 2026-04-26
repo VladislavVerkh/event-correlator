@@ -18,6 +18,7 @@
 - `EventBufferRepository` как storage contract;
 - PostgreSQL repository и Flyway migration для `ec_event_inbox`;
 - Spring Boot autoconfiguration;
+- `EventInboxInspector` для диагностики событий в durable inbox;
 - `PendingEventExpirationService` для перевода просроченных orphan events в `EXPIRED`;
 - `FailedEventRetryService` для повторной обработки transient failures;
 - testkit с in-memory repository.
@@ -121,6 +122,18 @@ void retryFailedEvents() {
 ```properties
 event.correlator.failure-max-attempts=3
 event.correlator.failure-retry-delay=PT1M
+```
+
+Для диагностики можно читать inbox без изменения событий:
+
+```java
+List<EventInboxRecord> failedEvents =
+    eventInboxInspector.findEvents(
+        EventInboxQuery.builder()
+            .flowName("contract-events")
+            .status(EventStatus.FAILED)
+            .limit(100)
+            .build());
 ```
 
 ## Сборка

@@ -9,10 +9,12 @@ import dev.verkhovskiy.eventcorrelator.EventCorrelator;
 import dev.verkhovskiy.eventcorrelator.EventDefinitionRegistry;
 import dev.verkhovskiy.eventcorrelator.EventFailureRetryPolicy;
 import dev.verkhovskiy.eventcorrelator.EventFlowDefinition;
+import dev.verkhovskiy.eventcorrelator.EventInboxInspector;
 import dev.verkhovskiy.eventcorrelator.FailedEventRetryService;
 import dev.verkhovskiy.eventcorrelator.PendingEventExpirationService;
 import dev.verkhovskiy.eventcorrelator.postgres.PostgresEventBufferRepository;
 import dev.verkhovskiy.eventcorrelator.postgres.PostgresEventCorrelationLock;
+import dev.verkhovskiy.eventcorrelator.postgres.PostgresEventInboxInspector;
 import dev.verkhovskiy.eventcorrelator.postgres.SpringPostgresEventCorrelationBoundary;
 import java.time.Clock;
 import java.util.List;
@@ -96,6 +98,14 @@ public class EventCorrelatorAutoConfiguration {
       ObjectMapper objectMapper,
       EventDefinitionRegistry definitionRegistry) {
     return new PostgresEventBufferRepository(jdbcTemplate, objectMapper, definitionRegistry);
+  }
+
+  @Bean
+  @ConditionalOnMissingBean
+  @ConditionalOnClass(NamedParameterJdbcTemplate.class)
+  @ConditionalOnBean(NamedParameterJdbcTemplate.class)
+  EventInboxInspector eventInboxInspector(NamedParameterJdbcTemplate jdbcTemplate) {
+    return new PostgresEventInboxInspector(jdbcTemplate);
   }
 
   @Bean

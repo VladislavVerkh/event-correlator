@@ -141,6 +141,26 @@ event.correlator.failed-retry-batch-size=100
 включить повторы, задайте значение больше `1`. Например, `3` означает первичную попытку и две
 повторные попытки.
 
+## Диагностика inbox
+
+`EventInboxInspector` дает доступ к durable inbox только для чтения. Он нужен для операторских
+экранов, диагностических endpoints и алертов:
+
+```java
+List<EventInboxRecord> pendingEvents =
+    eventInboxInspector.findEvents(
+        EventInboxQuery.builder()
+            .flowName("contract-events")
+            .correlationKey("contract-123")
+            .status(EventStatus.PENDING)
+            .limit(100)
+            .build());
+```
+
+Инспектор не возвращает `payload_json`: диагностический API намеренно легкий и не тянет потенциально
+большой или чувствительный payload. Для первого уровня диагностики доступны статус, `eventType`,
+`correlationKey`, `attempts`, `pendingReason`, `failureMessage` и временные метки.
+
 ## Валидация definitions
 
 `EventFlowDefinition` проверяется при `build()` и при регистрации в `EventDefinitionRegistry`.
