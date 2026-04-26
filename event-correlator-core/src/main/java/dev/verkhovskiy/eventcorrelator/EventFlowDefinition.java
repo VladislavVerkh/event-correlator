@@ -82,9 +82,13 @@ public final class EventFlowDefinition {
 
     public EventFlowDefinition build() {
       if (eventsByType.isEmpty()) {
-        throw new IllegalStateException("Event flow must contain at least one event type");
+        throw new EventDefinitionValidationException(
+            "Event flow `" + flowName + "` must contain at least one event type");
       }
-      return new EventFlowDefinition(flowName, eventsByType, orphanRetention);
+      EventFlowDefinition definition =
+          new EventFlowDefinition(flowName, eventsByType, orphanRetention);
+      EventFlowDefinitionValidator.validate(definition);
+      return definition;
     }
 
     Builder add(EventTypeDefinition<?> definition) {

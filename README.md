@@ -11,6 +11,7 @@
 ## Что уже есть
 
 - core contracts и DSL для описания связанных событий;
+- структурная валидация event flow definitions;
 - `DefaultEventCorrelator`, который дедуплицирует события, проверяет зависимости и обрабатывает
   pending-события после появления root/dependency;
 - transactional/locking boundary для последовательной обработки одного `flowName + correlationKey`;

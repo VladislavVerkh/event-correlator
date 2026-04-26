@@ -11,10 +11,18 @@ public class EventDefinitionRegistry {
   private final Map<String, EventFlowDefinition> definitionsByFlowName;
 
   public EventDefinitionRegistry(List<EventFlowDefinition> definitions) {
+    List<EventFlowDefinition> copiedDefinitions = List.copyOf(definitions);
+    copiedDefinitions.forEach(EventFlowDefinitionValidator::validate);
     definitionsByFlowName =
-        List.copyOf(definitions).stream()
+        copiedDefinitions.stream()
             .collect(
-                Collectors.toUnmodifiableMap(EventFlowDefinition::flowName, Function.identity()));
+                Collectors.toUnmodifiableMap(
+                    EventFlowDefinition::flowName,
+                    Function.identity(),
+                    (left, right) -> {
+                      throw new EventDefinitionValidationException(
+                          "Duplicate event flow: " + left.flowName());
+                    }));
   }
 
   public EventFlowDefinition requireFlow(String flowName) {

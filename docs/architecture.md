@@ -81,6 +81,19 @@ pg_advisory_xact_lock(hashtext(flow_name), hashtext(correlation_key))
 примененные бизнес-изменения перед выбросом исключения. Более строгая retry/rollback модель будет
 отдельным слоем развития.
 
+## Валидация definitions
+
+`EventFlowDefinition` проверяется при `build()` и при регистрации в `EventDefinitionRegistry`.
+Валидация ловит ошибки конфигурации до обработки событий:
+
+- flow должен содержать хотя бы один event type;
+- flow должен содержать хотя бы одно root-событие без dependencies;
+- каждый `.requires(...)` должен ссылаться на существующий event type того же flow;
+- граф dependencies не должен содержать циклы;
+- `EventDefinitionRegistry` не принимает два flow с одинаковым `flowName`.
+
+Если правило нарушено, выбрасывается `EventDefinitionValidationException`.
+
 ## Границы ответственности
 
 Библиотека отвечает за:
