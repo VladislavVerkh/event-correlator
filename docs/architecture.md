@@ -161,6 +161,20 @@ List<EventInboxRecord> pendingEvents =
 большой или чувствительный payload. Для первого уровня диагностики доступны статус, `eventType`,
 `correlationKey`, `attempts`, `pendingReason`, `failureMessage` и временные метки.
 
+Для dashboards и health checks используется `EventInboxStatisticsInspector`:
+
+```java
+EventInboxStatistics statistics =
+    eventInboxStatisticsInspector.getStatistics(
+        EventInboxStatisticsQuery.builder()
+            .flowName("contract-events")
+            .build());
+```
+
+Статистика возвращает количество событий по статусам, самый старый `PENDING`, самый старый `FAILED`,
+количество `FAILED` событий, готовых к retry, и количество `EXPIRED` событий. Фильтр поддерживает
+`flowName`, `eventType` и `correlationKey`.
+
 ## Ручной replay failed-событий
 
 После диагностики оператору часто нужно повторить одно конкретное событие: например, downstream

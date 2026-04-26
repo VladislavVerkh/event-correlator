@@ -12,15 +12,18 @@ import dev.verkhovskiy.eventcorrelator.EventDefinitionRegistry;
 import dev.verkhovskiy.eventcorrelator.EventFailureRetryPolicy;
 import dev.verkhovskiy.eventcorrelator.EventFlowDefinition;
 import dev.verkhovskiy.eventcorrelator.EventInboxInspector;
+import dev.verkhovskiy.eventcorrelator.EventInboxStatisticsInspector;
 import dev.verkhovskiy.eventcorrelator.FailedEventReplayService;
 import dev.verkhovskiy.eventcorrelator.FailedEventRetryService;
 import dev.verkhovskiy.eventcorrelator.PendingEventExpirationService;
 import dev.verkhovskiy.eventcorrelator.postgres.PostgresEventBufferRepository;
 import dev.verkhovskiy.eventcorrelator.postgres.PostgresEventCorrelationLock;
 import dev.verkhovskiy.eventcorrelator.postgres.PostgresEventInboxInspector;
+import dev.verkhovskiy.eventcorrelator.postgres.PostgresEventInboxStatisticsInspector;
 import dev.verkhovskiy.eventcorrelator.postgres.SpringPostgresEventCorrelationBoundary;
 import java.time.Clock;
 import java.util.List;
+import java.util.Objects;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
@@ -113,6 +116,15 @@ public class EventCorrelatorAutoConfiguration {
 
   @Bean
   @ConditionalOnMissingBean
+  @ConditionalOnClass(NamedParameterJdbcTemplate.class)
+  @ConditionalOnBean(NamedParameterJdbcTemplate.class)
+  EventInboxStatisticsInspector eventInboxStatisticsInspector(
+      NamedParameterJdbcTemplate jdbcTemplate) {
+    return new PostgresEventInboxStatisticsInspector(jdbcTemplate);
+  }
+
+  @Bean
+  @ConditionalOnMissingBean
   @ConditionalOnBean({EventDefinitionRegistry.class, EventBufferRepository.class, Clock.class})
   EventCorrelator eventCorrelator(
       EventDefinitionRegistry definitionRegistry,
@@ -123,20 +135,12 @@ public class EventCorrelatorAutoConfiguration {
       ObjectProvider<EventCorrelatorObserver> observers) {
     EventCorrelationBoundary eventCorrelationBoundary = boundary.getIfAvailable();
     EventCorrelatorObserver observer = observer(observers);
-    if (eventCorrelationBoundary == null) {
-      return new DefaultEventCorrelator(
-          definitionRegistry,
-          repository,
-          clock,
-          new DirectEventCorrelationBoundary(),
-          failureRetryPolicy,
-          observer);
-    }
     return new DefaultEventCorrelator(
         definitionRegistry,
         repository,
         clock,
-        eventCorrelationBoundary,
+        Objects.requireNonNullElseGet(eventCorrelationBoundary,
+            DirectEventCorrelationBoundary::new),
         failureRetryPolicy,
         observer);
   }

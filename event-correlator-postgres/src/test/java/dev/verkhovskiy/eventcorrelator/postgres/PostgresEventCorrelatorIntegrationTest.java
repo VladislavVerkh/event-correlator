@@ -10,6 +10,9 @@ import dev.verkhovskiy.eventcorrelator.EventCorrelator;
 import dev.verkhovskiy.eventcorrelator.EventDefinitionRegistry;
 import dev.verkhovskiy.eventcorrelator.EventFailureRetryPolicy;
 import dev.verkhovskiy.eventcorrelator.EventFlowDefinition;
+import dev.verkhovskiy.eventcorrelator.EventInboxStatistics;
+import dev.verkhovskiy.eventcorrelator.EventInboxStatisticsInspector;
+import dev.verkhovskiy.eventcorrelator.EventInboxStatisticsQuery;
 import dev.verkhovskiy.eventcorrelator.EventStatus;
 import dev.verkhovskiy.eventcorrelator.FailedEventReplayService;
 import dev.verkhovskiy.eventcorrelator.FailedEventRetryService;
@@ -387,6 +390,70 @@ class PostgresEventCorrelatorIntegrationTest {
     assertThat(handledEvents).containsExactly("processed");
   }
 
+  @Test
+  void returnsInboxStatisticsThroughPostgresInspector() {
+    EventFlowDefinition flow =
+        EventFlowDefinition.builder("contract-events")
+            .rootEvent(
+                "contract.created",
+                ContractCreated.class,
+                ContractCreated::contractId,
+                payload -> handledEvents.add("created"))
+            .rootEvent(
+                "contract.failed",
+                ContractFailed.class,
+                ContractFailed::contractId,
+                payload -> {
+                  throw new IllegalStateException("temporary failure");
+                })
+            .event("payment.schedule.changed", PaymentScheduleChanged.class)
+            .requiresRoot("contract.created")
+            .correlationKey(PaymentScheduleChanged::contractId)
+            .handler(payload -> handledEvents.add("schedule"))
+            .add()
+            .orphanRetention(Duration.ofSeconds(30))
+            .build();
+    PostgresEventBufferRepository repository = repository(flow);
+    EventCorrelator correlator =
+        correlator(flow, repository, new EventFailureRetryPolicy(2, Duration.ZERO));
+    PendingEventExpirationService expirationService =
+        new PendingEventExpirationService(repository, fixedClockAt("2026-01-01T00:00:31Z"), 10);
+    EventInboxStatisticsInspector statisticsInspector =
+        new PostgresEventInboxStatisticsInspector(jdbcTemplate);
+
+    correlator.accept(
+        event("contract.created", "event-1", "contract-1", new ContractCreated("contract-1")));
+    correlator.accept(
+        event(
+            "payment.schedule.changed",
+            "event-2",
+            "contract-2",
+            new PaymentScheduleChanged("contract-2")));
+    expirationService.runOnce();
+    correlator.accept(
+        event(
+            "payment.schedule.changed",
+            "event-3",
+            "contract-3",
+            new PaymentScheduleChanged("contract-3")));
+    correlator.accept(
+        event("contract.failed", "event-4", "contract-4", new ContractFailed("contract-4")));
+
+    EventInboxStatistics statistics =
+        statisticsInspector.getStatistics(
+            EventInboxStatisticsQuery.builder().flowName("contract-events").build());
+
+    assertThat(statistics.count(EventStatus.PROCESSED)).isEqualTo(1);
+    assertThat(statistics.count(EventStatus.EXPIRED)).isEqualTo(1);
+    assertThat(statistics.count(EventStatus.PENDING)).isEqualTo(1);
+    assertThat(statistics.count(EventStatus.FAILED)).isEqualTo(1);
+    assertThat(statistics.retryReadyCount()).isEqualTo(1);
+    assertThat(statistics.expiredCount()).isEqualTo(1);
+    assertThat(statistics.oldestPendingReceivedAt())
+        .isEqualTo(Instant.parse("2026-01-01T00:00:00Z"));
+    assertThat(statistics.oldestFailedAt()).isNotNull();
+  }
+
   private Callable<EventCorrelationResult> accept(
       EventCorrelator correlator, IncomingEvent<?> event) {
     return () -> correlator.accept(event);
@@ -467,6 +534,8 @@ class PostgresEventCorrelatorIntegrationTest {
   private record ContractCreated(String contractId) {}
 
   private record ContractActivated(String contractId) {}
+
+  private record ContractFailed(String contractId) {}
 
   private record PaymentScheduleChanged(String contractId) {}
 

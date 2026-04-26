@@ -20,6 +20,7 @@
 - Spring Boot autoconfiguration;
 - хуки наблюдаемости и Micrometer metrics через Spring Boot starter;
 - `EventInboxInspector` для диагностики событий в durable inbox;
+- `EventInboxStatisticsInspector` для health diagnostics и backlog summary;
 - `PendingEventExpirationService` для перевода просроченных orphan events в `EXPIRED`;
 - `FailedEventRetryService` для повторной обработки transient failures;
 - `FailedEventReplayService` для ручного replay конкретного failed-события;
@@ -135,6 +136,16 @@ List<EventInboxRecord> failedEvents =
             .flowName("contract-events")
             .status(EventStatus.FAILED)
             .limit(100)
+            .build());
+```
+
+Для health checks и dashboards можно получить агрегированное состояние inbox:
+
+```java
+EventInboxStatistics statistics =
+    eventInboxStatisticsInspector.getStatistics(
+        EventInboxStatisticsQuery.builder()
+            .flowName("contract-events")
             .build());
 ```
 
