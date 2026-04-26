@@ -168,6 +168,9 @@ event.correlator.failed.manual.replay
 ./gradlew check
 ```
 
+PostgreSQL integration tests используют Testcontainers. Если Docker недоступен, эти тесты
+пропускаются локально; в CI с Docker они выполняются против реального PostgreSQL.
+
 ## Документация
 
 - [Архитектура](docs/architecture.md)
