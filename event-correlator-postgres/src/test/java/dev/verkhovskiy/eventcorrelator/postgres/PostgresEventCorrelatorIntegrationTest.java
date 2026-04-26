@@ -8,10 +8,15 @@ import dev.verkhovskiy.eventcorrelator.EventCorrelationResult;
 import dev.verkhovskiy.eventcorrelator.EventCorrelationStatus;
 import dev.verkhovskiy.eventcorrelator.EventCorrelator;
 import dev.verkhovskiy.eventcorrelator.EventDefinitionRegistry;
+import dev.verkhovskiy.eventcorrelator.EventFailureRetryPolicy;
 import dev.verkhovskiy.eventcorrelator.EventFlowDefinition;
 import dev.verkhovskiy.eventcorrelator.EventStatus;
+import dev.verkhovskiy.eventcorrelator.FailedEventReplayService;
+import dev.verkhovskiy.eventcorrelator.FailedEventRetryService;
 import dev.verkhovskiy.eventcorrelator.IncomingEvent;
+import dev.verkhovskiy.eventcorrelator.PendingEventExpirationService;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
@@ -269,25 +274,157 @@ class PostgresEventCorrelatorIntegrationTest {
     assertThat(status("event-2")).isEqualTo(EventStatus.PROCESSED);
   }
 
+  @Test
+  void retriesFailedEventThroughPostgresInbox() {
+    AtomicInteger attempts = new AtomicInteger();
+    EventFlowDefinition flow =
+        EventFlowDefinition.builder("contract-events")
+            .rootEvent(
+                "contract.created",
+                ContractCreated.class,
+                ContractCreated::contractId,
+                payload -> {
+                  if (attempts.incrementAndGet() == 1) {
+                    throw new IllegalStateException("temporary failure");
+                  }
+                  handledEvents.add("processed");
+                })
+            .build();
+    PostgresEventBufferRepository repository = repository(flow);
+    EventCorrelator correlator =
+        correlator(flow, repository, new EventFailureRetryPolicy(2, Duration.ZERO));
+    FailedEventRetryService retryService =
+        new FailedEventRetryService(repository, correlator, fixedClock(), 10);
+
+    EventCorrelationResult failedResult =
+        correlator.accept(
+            event("contract.created", "event-1", "contract-1", new ContractCreated("contract-1")));
+
+    assertThat(failedResult.status()).isEqualTo(EventCorrelationStatus.FAILED);
+    assertThat(status("event-1")).isEqualTo(EventStatus.FAILED);
+    assertThat(attempts("event-1")).isEqualTo(1);
+
+    int retried = retryService.runOnce();
+
+    assertThat(retried).isEqualTo(1);
+    assertThat(status("event-1")).isEqualTo(EventStatus.PROCESSED);
+    assertThat(attempts).hasValue(2);
+    assertThat(handledEvents).containsExactly("processed");
+  }
+
+  @Test
+  void expiresPendingEventThroughPostgresInbox() {
+    EventFlowDefinition flow =
+        EventFlowDefinition.builder("contract-events")
+            .rootEvent(
+                "contract.created",
+                ContractCreated.class,
+                ContractCreated::contractId,
+                payload -> handledEvents.add("root"))
+            .event("payment.schedule.changed", PaymentScheduleChanged.class)
+            .requiresRoot("contract.created")
+            .correlationKey(PaymentScheduleChanged::contractId)
+            .handler(payload -> handledEvents.add("schedule"))
+            .add()
+            .orphanRetention(Duration.ofSeconds(30))
+            .build();
+    PostgresEventBufferRepository repository = repository(flow);
+    EventCorrelator correlator = correlator(flow, repository, EventFailureRetryPolicy.noRetries());
+    PendingEventExpirationService expirationService =
+        new PendingEventExpirationService(repository, fixedClockAt("2026-01-01T00:00:31Z"), 10);
+
+    EventCorrelationResult childResult =
+        correlator.accept(
+            event(
+                "payment.schedule.changed",
+                "event-2",
+                "contract-1",
+                new PaymentScheduleChanged("contract-1")));
+
+    assertThat(childResult.status()).isEqualTo(EventCorrelationStatus.PENDING);
+    assertThat(status("event-2")).isEqualTo(EventStatus.PENDING);
+
+    int expired = expirationService.runOnce();
+
+    assertThat(expired).isEqualTo(1);
+    assertThat(status("event-2")).isEqualTo(EventStatus.EXPIRED);
+    assertThat(handledEvents).isEmpty();
+  }
+
+  @Test
+  void manuallyReplaysFailedEventThroughPostgresInbox() {
+    AtomicInteger attempts = new AtomicInteger();
+    EventFlowDefinition flow =
+        EventFlowDefinition.builder("contract-events")
+            .rootEvent(
+                "contract.created",
+                ContractCreated.class,
+                ContractCreated::contractId,
+                payload -> {
+                  if (attempts.incrementAndGet() == 1) {
+                    throw new IllegalStateException("manual retry required");
+                  }
+                  handledEvents.add("processed");
+                })
+            .build();
+    PostgresEventBufferRepository repository = repository(flow);
+    EventCorrelator correlator = correlator(flow, repository, EventFailureRetryPolicy.noRetries());
+    FailedEventReplayService replayService = new FailedEventReplayService(repository, correlator);
+
+    EventCorrelationResult failedResult =
+        correlator.accept(
+            event("contract.created", "event-1", "contract-1", new ContractCreated("contract-1")));
+
+    assertThat(failedResult.status()).isEqualTo(EventCorrelationStatus.FAILED);
+    assertThat(status("event-1")).isEqualTo(EventStatus.FAILED);
+
+    var replayResult = replayService.replayFailed("contract-events", "event-1");
+
+    assertThat(replayResult).isPresent();
+    assertThat(replayResult.orElseThrow().status()).isEqualTo(EventCorrelationStatus.PROCESSED);
+    assertThat(status("event-1")).isEqualTo(EventStatus.PROCESSED);
+    assertThat(attempts).hasValue(2);
+    assertThat(handledEvents).containsExactly("processed");
+  }
+
   private Callable<EventCorrelationResult> accept(
       EventCorrelator correlator, IncomingEvent<?> event) {
     return () -> correlator.accept(event);
   }
 
   private EventCorrelator correlator(EventFlowDefinition flow) {
+    return correlator(flow, repository(flow), EventFailureRetryPolicy.noRetries());
+  }
+
+  private EventCorrelator correlator(
+      EventFlowDefinition flow,
+      PostgresEventBufferRepository repository,
+      EventFailureRetryPolicy retryPolicy) {
+    EventDefinitionRegistry definitionRegistry = new EventDefinitionRegistry(List.of(flow));
+    return new DefaultEventCorrelator(
+        definitionRegistry, repository, fixedClock(), boundary(), retryPolicy);
+  }
+
+  private PostgresEventBufferRepository repository(EventFlowDefinition flow) {
     PostgresEventBufferRepository repository =
         new PostgresEventBufferRepository(
             jdbcTemplate, new ObjectMapper(), new EventDefinitionRegistry(List.of(flow)));
-    SpringPostgresEventCorrelationBoundary boundary =
-        new SpringPostgresEventCorrelationBoundary(
-            new TransactionTemplate(
-                new DataSourceTransactionManager(jdbcTemplate.getJdbcTemplate().getDataSource())),
-            new PostgresEventCorrelationLock(jdbcTemplate));
-    return new DefaultEventCorrelator(
-        new EventDefinitionRegistry(List.of(flow)),
-        repository,
-        Clock.fixed(Instant.parse("2026-01-01T00:00:00Z"), ZoneOffset.UTC),
-        boundary);
+    return repository;
+  }
+
+  private SpringPostgresEventCorrelationBoundary boundary() {
+    return new SpringPostgresEventCorrelationBoundary(
+        new TransactionTemplate(
+            new DataSourceTransactionManager(jdbcTemplate.getJdbcTemplate().getDataSource())),
+        new PostgresEventCorrelationLock(jdbcTemplate));
+  }
+
+  private Clock fixedClock() {
+    return fixedClockAt("2026-01-01T00:00:00Z");
+  }
+
+  private Clock fixedClockAt(String instant) {
+    return Clock.fixed(Instant.parse(instant), ZoneOffset.UTC);
   }
 
   private <T> IncomingEvent<T> event(
@@ -316,6 +453,15 @@ class PostgresEventCorrelatorIntegrationTest {
         jdbcTemplate.queryForObject(
             "select count(*) from ec_event_inbox", new MapSqlParameterSource(), Integer.class);
     return count == null ? 0 : count;
+  }
+
+  private int attempts(String eventId) {
+    Integer attempts =
+        jdbcTemplate.queryForObject(
+            "select attempts from ec_event_inbox where event_id = :eventId",
+            new MapSqlParameterSource().addValue("eventId", eventId),
+            Integer.class);
+    return attempts == null ? 0 : attempts;
   }
 
   private record ContractCreated(String contractId) {}

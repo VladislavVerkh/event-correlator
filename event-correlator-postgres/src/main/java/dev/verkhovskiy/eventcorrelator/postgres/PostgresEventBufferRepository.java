@@ -133,7 +133,7 @@ public class PostgresEventBufferRepository implements EventBufferRepository {
         set status = :status,
             attempts = attempts + 1,
             next_retry_at = case
-              when attempts + 1 < :maxAttempts then :nextRetryAt
+              when attempts + 1 < :maxAttempts then cast(:nextRetryAt as timestamptz)
               else null
             end,
             failure_message = :failureMessage,
