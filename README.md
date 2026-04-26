@@ -1,0 +1,73 @@
+# event-correlator
+
+`event-correlator` - независимая библиотека для микросервисов, которые получают связанные
+бизнес-события из разных источников и должны обрабатывать их только после появления необходимых
+зависимостей.
+
+Типичный кейс: в сервис пришел график платежей или дополнительные атрибуты договора, но событие о
+самом договоре еще не пришло. Библиотека durable-сохраняет дочерние события, помечает их как
+`PENDING`, а после прихода root-события выпускает накопленные события в бизнес-обработчики.
+
+## Что уже есть
+
+- core contracts и DSL для описания связанных событий;
+- `DefaultEventCorrelator`, который дедуплицирует события, проверяет зависимости и обрабатывает
+  pending-события после появления root/dependency;
+- `EventBufferRepository` как storage contract;
+- PostgreSQL repository и Flyway migration для `ec_event_inbox`;
+- Spring Boot autoconfiguration;
+- testkit с in-memory repository.
+
+## Модули
+
+- `event-correlator-core` - contracts, DSL и базовый runtime.
+- `event-correlator-postgres` - PostgreSQL durable inbox.
+- `event-correlator-spring-boot-starter` - Spring Boot autoconfiguration.
+- `event-correlator-testkit` - test helpers.
+
+## Пример
+
+```java
+@Bean
+EventFlowDefinition contractEvents(ContractHandlers handlers) {
+  return EventFlowDefinition.builder("contract-events")
+      .rootEvent(
+          "contract.created",
+          ContractCreated.class,
+          ContractCreated::contractId,
+          handlers::applyContract)
+      .event("payment.schedule.changed", PaymentScheduleChanged.class)
+      .requiresRoot("contract.created")
+      .correlationKey(PaymentScheduleChanged::contractId)
+      .handler(handlers::applySchedule)
+      .add()
+      .orphanRetention(Duration.ofDays(7))
+      .build();
+}
+```
+
+Transport adapter, например Kafka listener, нормализует сообщение и вызывает:
+
+```java
+eventCorrelator.accept(
+    IncomingEvent.<PaymentScheduleChanged>builder()
+        .flowName("contract-events")
+        .eventType("payment.schedule.changed")
+        .eventId(kafkaEventId)
+        .correlationKey(payload.contractId())
+        .payload(payload)
+        .receivedAt(Instant.now())
+        .build());
+```
+
+## Сборка
+
+```bash
+./gradlew check
+```
+
+## Документация
+
+- [Архитектура](docs/architecture.md)
+- [Пример contract events](docs/examples/contract-events.md)
+

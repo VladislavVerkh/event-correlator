@@ -1,0 +1,179 @@
+package dev.verkhovskiy.eventcorrelator;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+import java.time.Clock;
+import java.time.Instant;
+import java.time.ZoneOffset;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import org.junit.jupiter.api.Test;
+
+class DefaultEventCorrelatorTest {
+
+  @Test
+  void keepsChildEventPendingUntilRootEventIsProcessed() {
+    List<String> handled = new ArrayList<>();
+    EventFlowDefinition flow =
+        EventFlowDefinition.builder("contract-events")
+            .rootEvent(
+                "contract.created",
+                ContractCreated.class,
+                ContractCreated::contractId,
+                payload -> handled.add("root:" + payload.contractId()))
+            .event("payment.schedule.changed", PaymentScheduleChanged.class)
+            .requiresRoot("contract.created")
+            .correlationKey(PaymentScheduleChanged::contractId)
+            .handler(payload -> handled.add("schedule:" + payload.contractId()))
+            .add()
+            .build();
+    TestEventBufferRepository repository = new TestEventBufferRepository();
+    EventCorrelator correlator = correlator(flow, repository);
+
+    EventCorrelationResult childResult =
+        correlator.accept(
+            event(
+                "contract-events",
+                "payment.schedule.changed",
+                "event-2",
+                "contract-1",
+                new PaymentScheduleChanged("contract-1")));
+
+    assertThat(childResult.status()).isEqualTo(EventCorrelationStatus.PENDING);
+    assertThat(handled).isEmpty();
+    assertThat(repository.status("event-2")).isEqualTo(EventStatus.PENDING);
+
+    EventCorrelationResult rootResult =
+        correlator.accept(
+            event(
+                "contract-events",
+                "contract.created",
+                "event-1",
+                "contract-1",
+                new ContractCreated("contract-1")));
+
+    assertThat(rootResult.status()).isEqualTo(EventCorrelationStatus.PROCESSED);
+    assertThat(handled).containsExactly("root:contract-1", "schedule:contract-1");
+    assertThat(repository.status("event-1")).isEqualTo(EventStatus.PROCESSED);
+    assertThat(repository.status("event-2")).isEqualTo(EventStatus.PROCESSED);
+  }
+
+  @Test
+  void returnsDuplicateWhenEventWasAlreadyAccepted() {
+    EventFlowDefinition flow =
+        EventFlowDefinition.builder("contract-events")
+            .rootEvent(
+                "contract.created",
+                ContractCreated.class,
+                ContractCreated::contractId,
+                payload -> {})
+            .build();
+    TestEventBufferRepository repository = new TestEventBufferRepository();
+    EventCorrelator correlator = correlator(flow, repository);
+    IncomingEvent<ContractCreated> event =
+        event(
+            "contract-events",
+            "contract.created",
+            "event-1",
+            "contract-1",
+            new ContractCreated("contract-1"));
+
+    assertThat(correlator.accept(event).status()).isEqualTo(EventCorrelationStatus.PROCESSED);
+    assertThat(correlator.accept(event).status()).isEqualTo(EventCorrelationStatus.DUPLICATE);
+  }
+
+  private EventCorrelator correlator(
+      EventFlowDefinition flow, TestEventBufferRepository repository) {
+    return new DefaultEventCorrelator(
+        new EventDefinitionRegistry(List.of(flow)),
+        repository,
+        Clock.fixed(Instant.parse("2026-01-01T00:00:00Z"), ZoneOffset.UTC));
+  }
+
+  private <T> IncomingEvent<T> event(
+      String flowName, String eventType, String eventId, String correlationKey, T payload) {
+    return IncomingEvent.<T>builder()
+        .flowName(flowName)
+        .eventType(eventType)
+        .eventId(eventId)
+        .correlationKey(correlationKey)
+        .payload(payload)
+        .receivedAt(Instant.parse("2026-01-01T00:00:00Z"))
+        .build();
+  }
+
+  private record ContractCreated(String contractId) {}
+
+  private record PaymentScheduleChanged(String contractId) {}
+
+  private static final class TestEventBufferRepository implements EventBufferRepository {
+    private final Map<EventPointer, BufferedEvent> events = new LinkedHashMap<>();
+
+    @Override
+    public boolean insertIfAbsent(BufferedEvent event) {
+      if (events.containsKey(event.pointer())) {
+        return false;
+      }
+      events.put(event.pointer(), event);
+      return true;
+    }
+
+    @Override
+    public void markPending(EventPointer pointer, String reason, Instant expiresAt) {
+      update(pointer, EventStatus.PENDING);
+    }
+
+    @Override
+    public void markProcessed(EventPointer pointer) {
+      update(pointer, EventStatus.PROCESSED);
+    }
+
+    @Override
+    public void markFailed(EventPointer pointer, String failureMessage) {
+      update(pointer, EventStatus.FAILED);
+    }
+
+    @Override
+    public void markExpired(EventPointer pointer) {
+      update(pointer, EventStatus.EXPIRED);
+    }
+
+    @Override
+    public boolean existsProcessed(String flowName, String eventType, String correlationKey) {
+      return events.values().stream()
+          .anyMatch(
+              event ->
+                  event.flowName().equals(flowName)
+                      && event.eventType().equals(eventType)
+                      && event.correlationKey().equals(correlationKey)
+                      && event.status() == EventStatus.PROCESSED);
+    }
+
+    @Override
+    public List<BufferedEvent> findPending(String flowName, String correlationKey) {
+      return events.values().stream()
+          .filter(
+              event ->
+                  event.flowName().equals(flowName)
+                      && event.correlationKey().equals(correlationKey)
+                      && event.status() == EventStatus.PENDING)
+          .sorted(Comparator.comparing(BufferedEvent::receivedAt))
+          .toList();
+    }
+
+    EventStatus status(String eventId) {
+      return events.values().stream()
+          .filter(event -> event.eventId().equals(eventId))
+          .findFirst()
+          .orElseThrow()
+          .status();
+    }
+
+    private void update(EventPointer pointer, EventStatus status) {
+      events.computeIfPresent(pointer, (ignored, event) -> event.withStatus(status));
+    }
+  }
+}

@@ -1,0 +1,54 @@
+package dev.verkhovskiy.eventcorrelator.autoconfigure;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import dev.verkhovskiy.eventcorrelator.EventCorrelator;
+import dev.verkhovskiy.eventcorrelator.EventDefinitionRegistry;
+import dev.verkhovskiy.eventcorrelator.EventFlowDefinition;
+import dev.verkhovskiy.eventcorrelator.postgres.PostgresEventBufferRepository;
+import org.junit.jupiter.api.Test;
+import org.springframework.boot.autoconfigure.AutoConfigurations;
+import org.springframework.boot.test.context.runner.ApplicationContextRunner;
+import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
+
+class EventCorrelatorAutoConfigurationTest {
+
+  @Test
+  void createsRuntimeBeansWhenJdbcInfrastructureExists() {
+    new ApplicationContextRunner()
+        .withConfiguration(AutoConfigurations.of(EventCorrelatorAutoConfiguration.class))
+        .withBean(ObjectMapper.class, ObjectMapper::new)
+        .withBean(NamedParameterJdbcTemplate.class, () -> mock(NamedParameterJdbcTemplate.class))
+        .withBean(EventFlowDefinition.class, EventCorrelatorAutoConfigurationTest::flow)
+        .run(
+            context -> {
+              assertThat(context).hasSingleBean(EventDefinitionRegistry.class);
+              assertThat(context).hasSingleBean(PostgresEventBufferRepository.class);
+              assertThat(context).hasSingleBean(EventCorrelator.class);
+            });
+  }
+
+  @Test
+  void backsOffWhenDisabled() {
+    new ApplicationContextRunner()
+        .withConfiguration(AutoConfigurations.of(EventCorrelatorAutoConfiguration.class))
+        .withPropertyValues("event.correlator.enabled=false")
+        .withBean(EventFlowDefinition.class, EventCorrelatorAutoConfigurationTest::flow)
+        .run(
+            context -> {
+              assertThat(context).doesNotHaveBean(EventDefinitionRegistry.class);
+              assertThat(context).doesNotHaveBean(EventCorrelator.class);
+            });
+  }
+
+  private static EventFlowDefinition flow() {
+    return EventFlowDefinition.builder("contract-events")
+        .rootEvent(
+            "contract.created", ContractCreated.class, ContractCreated::contractId, payload -> {})
+        .build();
+  }
+
+  private record ContractCreated(String contractId) {}
+}
